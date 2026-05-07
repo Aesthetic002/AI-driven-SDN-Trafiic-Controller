@@ -1,0 +1,26 @@
+# ── Development mode override ─────────────────────────────────────────────────
+# Mounts source code live into the container — edits reflect without rebuilding.
+# Flask auto-reloads when any .py file changes.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#
+# Or add a shell alias:
+#   alias sdn-dev="docker compose -f docker-compose.yml -f docker-compose.dev.yml"
+#   sdn-dev up --build
+
+services:
+
+  api:
+    # Override command to enable Flask auto-reload on file changes
+    command: >
+      python3 api/app.py --mock --host 0.0.0.0
+    environment:
+      - FLASK_DEBUG=1
+    # Mount source directories — changes appear instantly, no rebuild needed
+    volumes:
+      - ./agent:/app/agent
+      - ./api:/app/api
+      - ./collector:/app/collector
+      - ./traffic:/app/traffic
+      - ./constants.py:/app/constants.py

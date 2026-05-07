@@ -287,5 +287,6 @@ if __name__ == "__main__":
         print(f"[api] Production mode — reading {RUNTIME_STATE_FILE}")
         threading.Thread(target=_file_pump, daemon=True).start()
 
-    print(f"[api] Listening on http://{args.host}:{args.port}")
-    app.run(host=args.host, port=args.port, threaded=True)
+    debug = os.environ.get("FLASK_DEBUG", "0") == "1"
+    print(f"[api] Listening on http://{args.host}:{args.port}{'  [debug/reload on]' if debug else ''}")
+    app.run(host=args.host, port=args.port, threaded=True, use_reloader=debug, debug=debug)
