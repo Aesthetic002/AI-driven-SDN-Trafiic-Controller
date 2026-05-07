@@ -61,7 +61,7 @@ _threads: list[threading.Thread] = []
 
 
 def start_ryu() -> subprocess.Popen:
-    python = os.path.join(ROOT, ".venv", "bin", "python3")
+    python = sys.executable
     controller = os.path.join(ROOT, "controller", "ryu_controller.py")
     proc = subprocess.Popen(
         [python, "-m", "ryu.cmd.manager",

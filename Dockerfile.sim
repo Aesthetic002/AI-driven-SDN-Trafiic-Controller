@@ -1,0 +1,50 @@
+# ── Full simulation image (Linux host only) ───────────────────────────────────
+# Runs the real Mininet + OvS + Ryu + DQN training loop.
+# Requires a Linux host with Docker privileged mode.
+#
+# Build: docker compose -f docker-compose.sim.yml build
+# Run  : docker compose -f docker-compose.sim.yml up
+#
+# Does NOT work on Docker Desktop for Mac/Windows because
+# Mininet needs raw Linux kernel namespaces on the host kernel.
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# System packages: OvS + Mininet + Python + build tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip \
+    openvswitch-switch \
+    mininet \
+    net-tools iproute2 iputils-ping tcpdump \
+    gcc g++ libffi-dev libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Pin setuptools before installing ryu (ryu uses old setuptools APIs)
+RUN pip3 install --no-cache-dir "setuptools==65.5.0" wheel
+
+# PyTorch CPU-only
+RUN pip3 install --no-cache-dir torch \
+        --index-url https://download.pytorch.org/whl/cpu
+
+# Full requirements (includes ryu)
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt || \
+    pip3 install --no-cache-dir --no-build-isolation -r requirements.txt
+
+# Patch Ryu for Python 3.10+ compatibility
+COPY scripts/ scripts/
+COPY constants.py .
+RUN python3 scripts/patch_ryu.py
+
+# Copy full source
+COPY . .
+
+EXPOSE 5000 8080
+
+COPY docker-entrypoint-sim.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]

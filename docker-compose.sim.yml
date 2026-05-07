@@ -1,0 +1,42 @@
+# ── Full simulation mode — Linux host only ────────────────────────────────────
+#
+# Runs the real Mininet + OvS + Ryu + DQN training loop.
+# Requires a Linux machine with Docker (NOT Docker Desktop for Mac/Windows).
+#
+# Usage:
+#   docker compose -f docker-compose.sim.yml up --build
+#
+# Flags passed to train.py:
+#   --phase-secs 60   → 4 phases × 60s = 4 min total (change as needed)
+#
+# Volumes:
+#   ./model_weights.pth   → persists trained weights across container runs
+#   /tmp                  → shares replay buffer + runtime state file
+
+services:
+
+  simulation:
+    build:
+      context: .
+      dockerfile: Dockerfile.sim
+    container_name: sdn-simulation
+    command: ["--phase-secs", "60"]
+    network_mode: host        # Mininet needs host networking for OvS bridges
+    privileged: true          # Required for network namespaces + OvS kernel module
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_MODULE
+    volumes:
+      - ./model_weights.pth:/app/model_weights.pth   # persist weights
+      - /tmp:/tmp                                     # share runtime state
+    restart: "no"
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: sdn-dashboard
+    ports:
+      - "8080:80"
+    restart: unless-stopped

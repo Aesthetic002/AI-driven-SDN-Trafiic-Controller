@@ -1,0 +1,38 @@
+# ── Demo / Mock mode — works on Mac, Windows, Linux ──────────────────────────
+#
+# Usage:
+#   docker compose up --build
+#
+# Then open:
+#   http://localhost:8080   → live dashboard
+#   http://localhost:5000   → REST API
+#
+# The API runs in --mock mode: synthetic IoT traffic data updates every 2s.
+# No Mininet, no OvS, no sudo required.
+
+services:
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sdn-api
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/agent')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: sdn-dashboard
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    depends_on:
+      - api

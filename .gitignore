@@ -7,8 +7,8 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Model weights and runtime files (large / machine-specific)
-model_weights.pth
+# Model weights (optional — uncomment to exclude from git)
+# model_weights.pth
 
 # Runtime tmp files written during training
 /tmp/sdn_runtime_state.json
