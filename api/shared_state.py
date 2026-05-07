@@ -34,6 +34,10 @@ _state = {
     "loss_history":     deque(maxlen=200),
     "util_history":     deque(maxlen=200),   # avg link util per tick
 
+    # DQN vs baseline comparison
+    "comparison":       {},
+    "compare_history":  deque(maxlen=200),
+
     # Timestamps
     "last_update":      None,
     "start_time":       time.time(),
@@ -93,6 +97,18 @@ def push_util(avg_util: float):
         _state["util_history"].append({"t": time.time(), "util": avg_util})
 
 
+def push_comparison(comparison: dict):
+    with _lock:
+        _state["comparison"] = dict(comparison or {})
+        if comparison:
+            _state["compare_history"].append({
+                "t": time.time(),
+                "dqn_reward": comparison.get("dqn_reward"),
+                "baseline_reward": comparison.get("baseline_reward"),
+                "reward_delta": comparison.get("reward_delta"),
+            })
+
+
 # ── Read API (called by Flask) ─────────────────────────────────────────────────
 
 def snapshot() -> dict:
@@ -111,6 +127,8 @@ def snapshot() -> dict:
             "reward_history": list(_state["reward_history"]),
             "loss_history":   list(_state["loss_history"]),
             "util_history":   list(_state["util_history"]),
+            "comparison":     dict(_state["comparison"]),
+            "compare_history": list(_state["compare_history"]),
             "last_update":    _state["last_update"],
             "uptime_s":       round(uptime, 1),
         }

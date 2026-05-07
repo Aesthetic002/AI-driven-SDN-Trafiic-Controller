@@ -43,18 +43,33 @@ sudo .venv/bin/python3 train.py --phase-secs 60
 
 This starts all five components in the right order, runs 4 traffic phases (4 × 60 s = 4 min), prints a summary, and saves model weights + replay buffer automatically.
 
+**Comparison mode examples:**
+
+```bash
+# Default: DQN controls routing + shadow baseline comparison
+sudo .venv/bin/python3 train.py --phase-secs 60 --routing-mode dqn --baseline-policy least_utilized
+
+# Baseline-only control run (for A/B demo)
+sudo .venv/bin/python3 train.py --phase-secs 60 --routing-mode baseline --baseline-policy round_robin
+```
+
 **Flags:**
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--phase-secs N` | 60 | Seconds per traffic phase (total = 4 × N) |
 | `--no-dashboard` | off | Skip the dashboard HTTP server |
+| `--routing-mode {dqn,baseline}` | dqn | Select which policy controls live flow installs |
+| `--baseline-policy {shortest_path,ecmp_hash,round_robin,least_utilized,random}` | least_utilized | Baseline policy for baseline mode + shadow comparison |
+| `--no-shadow-compare` | off | Disable DQN-vs-baseline shadow metrics |
 
 ### Check progress while running
 
 - Dashboard: http://localhost:8080
 - REST API: http://localhost:5000
 - Full snapshot: http://localhost:5000/api/snapshot
+- Comparison snapshot: http://localhost:5000/api/compare/current
+- Comparison history: http://localhost:5000/api/compare/history
 
 ---
 

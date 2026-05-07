@@ -15,8 +15,7 @@ import json
 import os
 import sys
 import time
-import logging
-from collections import deque, defaultdict
+from collections import deque
 from dataclasses import dataclass, field
 
 from ryu.base import app_manager
@@ -48,10 +47,16 @@ from constants import (
     DSCP_EMERGENCY,
     # Actions
     ACTION_PATH_A, ACTION_PATH_B, ACTION_PATH_C, ACTION_DROP, ACTION_NAMES,
+    # Comparison mode
+    ROUTING_MODE_DQN, ROUTING_MODE_BASELINE, BASELINE_POLICY_DEFAULT,
 )
 from agent.dqn_agent import DQNAgent, compute_reward
 from collector.stats_collector import StatsCollector
-from constants import FEATURE_NAMES, ACTION_NAMES, RUNTIME_STATE_FILE, REPLAY_BUFFER_FILE
+from constants import FEATURE_NAMES, RUNTIME_STATE_FILE, REPLAY_BUFFER_FILE
+from controller.baseline_router import (
+    BaselineRouter,
+    BASELINE_POLICIES,
+)
 import api.shared_state as shared_state
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -107,13 +112,38 @@ class IoTController(app_manager.RyuApp):
 
         self.datapaths: dict[int, object] = {}
 
+        mode = os.getenv("SDN_ROUTING_MODE", ROUTING_MODE_DQN).strip().lower()
+        if mode not in {ROUTING_MODE_DQN, ROUTING_MODE_BASELINE}:
+            mode = ROUTING_MODE_DQN
+        self.routing_mode = mode
+
+        policy = os.getenv("SDN_BASELINE_POLICY", BASELINE_POLICY_DEFAULT).strip().lower()
+        if policy not in BASELINE_POLICIES:
+            policy = BASELINE_POLICY_DEFAULT
+        self.baseline_policy = policy
+        self.shadow_compare_enabled = os.getenv("SDN_COMPARE_SHADOW", "1").strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+        self.baseline_router = BaselineRouter(
+            policy=self.baseline_policy,
+            seed=int(os.getenv("SDN_BASELINE_SEED", "42")),
+        )
+
         # flow_key = (ip_src, ip_dst) → FlowEntry
         self.flow_table: dict[tuple, FlowEntry] = {}
+        # Shadow flow table for non-active policy in comparison mode.
+        self.shadow_flow_table: dict[tuple, FlowEntry] = {}
 
-        # Count of active flows per action/path
-        self.path_counts: dict[int, int] = {
-            ACTION_PATH_A: 0, ACTION_PATH_B: 0, ACTION_PATH_C: 0
+        # Count of active flows per action/path (actual policy + comparison policy).
+        self.dqn_path_counts: dict[int, int] = {
+            ACTION_PATH_A: 0, ACTION_PATH_B: 0, ACTION_PATH_C: 0, ACTION_DROP: 0,
         }
+        self.baseline_path_counts: dict[int, int] = {
+            ACTION_PATH_A: 0, ACTION_PATH_B: 0, ACTION_PATH_C: 0, ACTION_DROP: 0,
+        }
+        self.path_counts = (
+            self.dqn_path_counts if self.routing_mode == ROUTING_MODE_DQN else self.baseline_path_counts
+        )
 
         # Rolling LSTM input buffer (seq_len snapshots of the 20-feature state)
         self.state_buffer: deque = deque(
@@ -137,6 +167,15 @@ class IoTController(app_manager.RyuApp):
         # Training counters
         self.learn_steps = 0
         self.total_reward = 0.0
+        self.dqn_total_reward = 0.0
+        self.baseline_total_reward = 0.0
+
+        self.logger.info(
+            "Routing mode=%s baseline=%s shadow_compare=%s",
+            self.routing_mode,
+            self.baseline_policy,
+            self.shadow_compare_enabled,
+        )
 
         hub.spawn(self._stats_loop)
 
@@ -194,23 +233,44 @@ class IoTController(app_manager.RyuApp):
         is_priority = (src_ip in EMERGENCY_IPS or src_ip in ACTUATOR_IPS)
         state_seq   = list(self.state_buffer)
 
-        action = self.agent.select_action(state_seq)
-
-        # Emergency/actuator flows are never dropped — override to Path A
-        if is_priority and action == ACTION_DROP:
-            action = ACTION_PATH_A
+        dqn_action = self._enforce_priority_action(
+            self.agent.select_action(state_seq), is_priority
+        )
+        baseline_action = self._enforce_priority_action(
+            self.baseline_router.select_action(
+                flow_key=flow_key,
+                state=state_seq[-1],
+                path_counts=self.baseline_path_counts,
+            ),
+            is_priority,
+        )
+        action = dqn_action if self.routing_mode == ROUTING_MODE_DQN else baseline_action
+        shadow_action = baseline_action if self.routing_mode == ROUTING_MODE_DQN else dqn_action
 
         self.flow_table[flow_key] = FlowEntry(
             action=action,
             state_seq=state_seq,
             is_priority=is_priority,
         )
-        if action != ACTION_DROP:
-            self.path_counts[action] = self.path_counts.get(action, 0) + 1
+        self.path_counts[action] = self.path_counts.get(action, 0) + 1
+
+        if self.shadow_compare_enabled:
+            self.shadow_flow_table[flow_key] = FlowEntry(
+                action=shadow_action,
+                state_seq=state_seq,
+                is_priority=is_priority,
+            )
+            shadow_counts = (
+                self.baseline_path_counts
+                if self.routing_mode == ROUTING_MODE_DQN
+                else self.dqn_path_counts
+            )
+            shadow_counts[shadow_action] = shadow_counts.get(shadow_action, 0) + 1
 
         self.logger.info(
-            "New flow %s→%s | action=%s | ε=%.3f",
-            src_ip, dst_ip, ACTION_NAMES[action], self.agent.epsilon,
+            "New flow %s→%s | mode=%s action=%s | dqn=%s baseline=%s ε=%.3f",
+            src_ip, dst_ip, self.routing_mode, ACTION_NAMES[action],
+            ACTION_NAMES[dqn_action], ACTION_NAMES[baseline_action], self.agent.epsilon,
         )
 
         if action == ACTION_DROP:
@@ -252,25 +312,47 @@ class IoTController(app_manager.RyuApp):
             # ── Train on each active flow ──────────────────────────────────────
             for flow_key, entry in list(self.flow_table.items()):
                 reward = compute_reward(entry.state_seq[-1], entry.action, new_state)
-                self.agent.store(
-                    entry.state_seq, entry.action, reward, next_state_seq, done=False
-                )
-                self.total_reward += reward
+                if self.routing_mode == ROUTING_MODE_DQN:
+                    self.agent.store(
+                        entry.state_seq, entry.action, reward, next_state_seq, done=False
+                    )
+                    self.dqn_total_reward += reward
+                else:
+                    self.baseline_total_reward += reward
                 # Update the entry's state_seq to slide the window forward
                 entry.state_seq = next_state_seq
 
-            loss = self.agent.learn()
-            if loss is not None:
-                self.learn_steps += 1
-                if self.learn_steps % 10 == 0:
-                    self.logger.info(
-                        "Train step=%d | loss=%.4f | ε=%.4f | reward_sum=%.2f",
-                        self.learn_steps, loss, self.agent.epsilon, self.total_reward,
-                    )
+            for flow_key, entry in list(self.shadow_flow_table.items()):
+                shadow_reward = compute_reward(entry.state_seq[-1], entry.action, new_state)
+                if self.routing_mode == ROUTING_MODE_DQN:
+                    self.baseline_total_reward += shadow_reward
+                else:
+                    self.dqn_total_reward += shadow_reward
+                entry.state_seq = next_state_seq
+
+            loss = None
+            if self.routing_mode == ROUTING_MODE_DQN:
+                loss = self.agent.learn()
+                if loss is not None:
+                    self.learn_steps += 1
+                    if self.learn_steps % 10 == 0:
+                        self.logger.info(
+                            "Train step=%d | loss=%.4f | ε=%.4f | dqn_reward=%.2f baseline_reward=%.2f",
+                            self.learn_steps, loss, self.agent.epsilon,
+                            self.dqn_total_reward, self.baseline_total_reward,
+                        )
 
             # Save every stats cycle so progress is never lost between runs
-            self.agent.save(WEIGHTS_PATH)
-            self.agent.save_buffer(REPLAY_BUFFER_FILE)
+            if self.routing_mode == ROUTING_MODE_DQN:
+                self.agent.save(WEIGHTS_PATH)
+                self.agent.save_buffer(REPLAY_BUFFER_FILE)
+
+            self.total_reward = (
+                self.dqn_total_reward
+                if self.routing_mode == ROUTING_MODE_DQN
+                else self.baseline_total_reward
+            )
+            comparison_payload = self._build_comparison_payload()
 
             # ── Push to Flask API shared state ────────────────────────────────
             shared_state.push_state(new_state, FEATURE_NAMES)
@@ -279,11 +361,12 @@ class IoTController(app_manager.RyuApp):
             )
             shared_state.push_path_counts(self.path_counts)
             shared_state.push_flows(self.flow_table)
+            shared_state.push_comparison(comparison_payload)
             avg_util = sum(new_state[:7]) / 7
             shared_state.push_util(avg_util)
 
             # ── Write metrics to file for cross-process Flask API ─────────────
-            self._write_state_file(new_state, loss, avg_util)
+            self._write_state_file(new_state, loss, avg_util, comparison_payload)
 
             self.prev_state = new_state
             hub.sleep(STATS_INTERVAL)
@@ -413,7 +496,7 @@ class IoTController(app_manager.RyuApp):
         )
         dp.send_msg(out)
 
-    def _write_state_file(self, state: list, loss, avg_util: float):
+    def _write_state_file(self, state: list, loss, avg_util: float, comparison: dict):
         flows = {}
         for (src, dst), entry in self.flow_table.items():
             flows[f"{src}->{dst}"] = {
@@ -438,6 +521,7 @@ class IoTController(app_manager.RyuApp):
             },
             "active_flows": flows,
             "avg_util":     avg_util,
+            "comparison":   comparison,
         }
         try:
             tmp = RUNTIME_STATE_FILE + ".tmp"
@@ -452,8 +536,9 @@ class IoTController(app_manager.RyuApp):
 
     def close(self):
         """Called by Ryu on shutdown — save final weights and replay buffer."""
-        self.agent.save(WEIGHTS_PATH)
-        self.agent.save_buffer(REPLAY_BUFFER_FILE)
+        if self.routing_mode == ROUTING_MODE_DQN:
+            self.agent.save(WEIGHTS_PATH)
+            self.agent.save_buffer(REPLAY_BUFFER_FILE)
         self.logger.info(
             "Shutdown: saved weights+buffer (step=%d, ε=%.4f, buf=%d)",
             self.learn_steps, self.agent.epsilon, len(self.agent.replay),
@@ -475,14 +560,75 @@ class IoTController(app_manager.RyuApp):
         if entry is None:
             return
 
-        if entry.action != ACTION_DROP:
-            self.path_counts[entry.action] = max(
-                0, self.path_counts.get(entry.action, 0) - 1
+        self.path_counts[entry.action] = max(0, self.path_counts.get(entry.action, 0) - 1)
+
+        shadow_entry = self.shadow_flow_table.pop(flow_key, None)
+        if shadow_entry is not None:
+            shadow_counts = (
+                self.baseline_path_counts
+                if self.routing_mode == ROUTING_MODE_DQN
+                else self.dqn_path_counts
+            )
+            shadow_counts[shadow_entry.action] = max(
+                0, shadow_counts.get(shadow_entry.action, 0) - 1
             )
 
         # Final experience: mark done=True so agent discounts future correctly
         current_state_seq = list(self.state_buffer)
         reward = compute_reward(entry.state_seq[-1], entry.action, self.prev_state)
-        self.agent.store(entry.state_seq, entry.action, reward, current_state_seq, done=True)
+        if self.routing_mode == ROUTING_MODE_DQN:
+            self.agent.store(entry.state_seq, entry.action, reward, current_state_seq, done=True)
+            self.dqn_total_reward += reward
+        else:
+            self.baseline_total_reward += reward
+
+        if shadow_entry is not None:
+            shadow_reward = compute_reward(
+                shadow_entry.state_seq[-1], shadow_entry.action, self.prev_state
+            )
+            if self.routing_mode == ROUTING_MODE_DQN:
+                self.baseline_total_reward += shadow_reward
+            else:
+                self.dqn_total_reward += shadow_reward
+
         self.logger.debug("Flow removed %s→%s path=%s reward=%.3f",
                           src_ip, dst_ip, ACTION_NAMES[entry.action], reward)
+
+    def _enforce_priority_action(self, action: int, is_priority: bool) -> int:
+        # Emergency/actuator flows are never dropped.
+        if is_priority and action == ACTION_DROP:
+            return ACTION_PATH_A
+        return action
+
+    def _named_counts(self, counts: dict[int, int]) -> dict[str, int]:
+        return {
+            "PATH_A": counts.get(ACTION_PATH_A, 0),
+            "PATH_B": counts.get(ACTION_PATH_B, 0),
+            "PATH_C": counts.get(ACTION_PATH_C, 0),
+            "DROP": counts.get(ACTION_DROP, 0),
+        }
+
+    @staticmethod
+    def _delta_pct(base: float, compared: float) -> float | None:
+        if abs(base) < 1e-9:
+            return None
+        return ((compared - base) / abs(base)) * 100.0
+
+    def _build_comparison_payload(self) -> dict:
+        delta = self.dqn_total_reward - self.baseline_total_reward
+        winner = "dqn" if delta > 0 else "baseline" if delta < 0 else "tie"
+        return {
+            "enabled": self.shadow_compare_enabled,
+            "routing_mode": self.routing_mode,
+            "baseline_policy": self.baseline_policy,
+            "dqn_reward": round(self.dqn_total_reward, 3),
+            "baseline_reward": round(self.baseline_total_reward, 3),
+            "reward_delta": round(delta, 3),
+            "reward_delta_pct": (
+                None if (pct := self._delta_pct(self.baseline_total_reward, self.dqn_total_reward)) is None
+                else round(pct, 2)
+            ),
+            "winner": winner,
+            "dqn_path_counts": self._named_counts(self.dqn_path_counts),
+            "baseline_path_counts": self._named_counts(self.baseline_path_counts),
+        }

@@ -60,7 +60,37 @@
     .stat-card .sub   { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
     /* ── Topology ── */
-    #topo-panel { grid-column: 1 / 2; grid-row: 2 / 4; }
+    #compare-panel { grid-column: 1 / -1; }
+    .compare-grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .cmp-card {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px;
+      background: #141824;
+    }
+    .cmp-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+    .cmp-value { margin-top: 4px; font-size: 14px; font-weight: 700; }
+    .delta-up { color: var(--green); }
+    .delta-down { color: var(--red); }
+    .delta-flat { color: var(--muted); }
+    .compare-path-split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .compare-path-split h3 {
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+
+    #topo-panel { grid-column: 1 / 2; }
     #topo-svg { width: 100%; height: 340px; }
 
     /* ── Reward chart ── */
@@ -146,6 +176,47 @@
       <div class="label">Active Flows</div>
       <div class="value" id="val-flows">—</div>
       <div class="sub">currently routed</div>
+    </div>
+  </div>
+
+  <!-- Comparison -->
+  <div class="panel" id="compare-panel">
+    <h2>DQN vs Baseline Comparison</h2>
+    <div class="compare-grid">
+      <div class="cmp-card">
+        <div class="cmp-label">Routing Mode</div>
+        <div class="cmp-value" id="cmp-mode">—</div>
+      </div>
+      <div class="cmp-card">
+        <div class="cmp-label">Baseline Policy</div>
+        <div class="cmp-value" id="cmp-policy">—</div>
+      </div>
+      <div class="cmp-card">
+        <div class="cmp-label">Winner</div>
+        <div class="cmp-value" id="cmp-winner">—</div>
+      </div>
+      <div class="cmp-card">
+        <div class="cmp-label">DQN Reward</div>
+        <div class="cmp-value" id="cmp-dqn-reward">—</div>
+      </div>
+      <div class="cmp-card">
+        <div class="cmp-label">Baseline Reward</div>
+        <div class="cmp-value" id="cmp-baseline-reward">—</div>
+      </div>
+      <div class="cmp-card">
+        <div class="cmp-label">Delta (DQN - Baseline)</div>
+        <div class="cmp-value" id="cmp-delta">—</div>
+      </div>
+    </div>
+    <div class="compare-path-split">
+      <div>
+        <h3>DQN Path Split</h3>
+        <div id="cmp-dqn-paths"></div>
+      </div>
+      <div>
+        <h3>Baseline Path Split</h3>
+        <div id="cmp-base-paths"></div>
+      </div>
     </div>
   </div>
 
@@ -313,6 +384,56 @@ function renderPathBars(counts) {
     </div>`).join('');
 }
 
+function renderMiniPathBars(containerId, counts = {}) {
+  const total = Object.values(counts).reduce((a,b)=>a+b, 0) || 1;
+  const defs = [
+    { key:'PATH_A', label:'A', color:'var(--pathA)' },
+    { key:'PATH_B', label:'B', color:'var(--pathB)' },
+    { key:'PATH_C', label:'C', color:'var(--pathC)' },
+    { key:'DROP',   label:'D', color:'var(--drop)'  },
+  ];
+  document.getElementById(containerId).innerHTML = defs.map(d => `
+    <div class="path-bar-row">
+      <span class="path-label">${d.label}</span>
+      <div class="path-bar-bg">
+        <div class="path-bar-fill" style="width:${(counts[d.key]||0)/total*100}%;background:${d.color}"></div>
+      </div>
+      <span class="path-count">${counts[d.key]||0}</span>
+    </div>
+  `).join('');
+}
+
+function renderComparison(cmp = {}) {
+  const enabled = !!cmp.enabled || Object.keys(cmp).length > 0;
+  if (!enabled) {
+    setVal('cmp-mode', '—');
+    setVal('cmp-policy', '—');
+    setVal('cmp-winner', '—');
+    setVal('cmp-dqn-reward', '—');
+    setVal('cmp-baseline-reward', '—');
+    setVal('cmp-delta', '—');
+    renderMiniPathBars('cmp-dqn-paths', {});
+    renderMiniPathBars('cmp-base-paths', {});
+    return;
+  }
+
+  const delta = Number(cmp.reward_delta ?? 0);
+  const deltaPct = cmp.reward_delta_pct == null ? 'n/a' : `${fmt(cmp.reward_delta_pct, 2)}%`;
+  const winner = (cmp.winner || 'tie').toUpperCase();
+
+  setVal('cmp-mode', String(cmp.routing_mode || 'dqn').toUpperCase());
+  setVal('cmp-policy', cmp.baseline_policy || 'least_utilized');
+  setVal('cmp-winner', winner);
+  setVal('cmp-dqn-reward', fmt(cmp.dqn_reward, 2));
+  setVal('cmp-baseline-reward', fmt(cmp.baseline_reward, 2));
+  const deltaEl = document.getElementById('cmp-delta');
+  deltaEl.textContent = `${delta >= 0 ? '+' : ''}${fmt(delta, 2)} (${deltaPct})`;
+  deltaEl.className = 'cmp-value ' + (delta > 0 ? 'delta-up' : delta < 0 ? 'delta-down' : 'delta-flat');
+
+  renderMiniPathBars('cmp-dqn-paths', cmp.dqn_path_counts || {});
+  renderMiniPathBars('cmp-base-paths', cmp.baseline_path_counts || {});
+}
+
 // ── Utilisation bars ─────────────────────────────────────────────────────────
 const UTIL_LABELS = [
   'S1→S3','S1→S4','S2→S3','S2→S4',
@@ -384,6 +505,7 @@ function connect() {
 
     // Path bars & utils & flows
     renderPathBars(d.path_counts);
+    renderComparison(d.comparison || {});
     if (d.current_state.length) renderUtilBars(d.current_state);
     renderFlows(d.active_flows);
 

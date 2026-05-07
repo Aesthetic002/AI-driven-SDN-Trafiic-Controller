@@ -178,3 +178,14 @@ API_BASE            = f"http://{API_HOST}:{API_PORT}"
 DASHBOARD_PORT      = 8080
 RUNTIME_STATE_FILE  = "/tmp/sdn_runtime_state.json"
 REPLAY_BUFFER_FILE  = "/tmp/sdn_replay_buffer.pkl"
+
+# ── Routing comparison modes ────────────────────────────────────────────────────
+ROUTING_MODE_DQN      = "dqn"
+ROUTING_MODE_BASELINE = "baseline"
+
+BASELINE_POLICY_SHORTEST_PATH  = "shortest_path"
+BASELINE_POLICY_ECMP_HASH      = "ecmp_hash"
+BASELINE_POLICY_ROUND_ROBIN    = "round_robin"
+BASELINE_POLICY_LEAST_UTILIZED = "least_utilized"
+BASELINE_POLICY_RANDOM         = "random"
+BASELINE_POLICY_DEFAULT        = BASELINE_POLICY_LEAST_UTILIZED

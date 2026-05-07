@@ -17,6 +17,8 @@ Endpoints:
     GET  /api/metrics     reward + loss + utilisation history
     GET  /api/topology    static network topology (for dashboard)
     GET  /api/snapshot    everything in one call
+    GET  /api/compare/current  latest DQN vs baseline comparison snapshot
+    GET  /api/compare/history  rolling comparison history
     GET  /api/stream      Server-Sent Events stream (real-time updates)
     POST /api/reset       reset reward accumulator (for experiment runs)
 """
@@ -112,6 +114,8 @@ a{color:#6366f1}h1{margin-bottom:24px}</style>
   <li><a href="/api/flows">/api/flows</a> — active flows</li>
   <li><a href="/api/metrics">/api/metrics</a> — reward/loss/util history</li>
   <li><a href="/api/topology">/api/topology</a> — static network graph</li>
+  <li><a href="/api/compare/current">/api/compare/current</a> — latest DQN vs baseline</li>
+  <li><a href="/api/compare/history">/api/compare/history</a> — comparison history</li>
   <li>/api/stream — Server-Sent Events (used by dashboard)</li>
 </ul>"""
 
@@ -173,12 +177,27 @@ def get_snapshot():
     return jsonify(snap)
 
 
+@app.get("/api/compare/current")
+def get_compare_current():
+    return jsonify(ss.snapshot().get("comparison", {}))
+
+
+@app.get("/api/compare/history")
+def get_compare_history():
+    snap = ss.snapshot()
+    return jsonify({
+        "comparison": snap.get("comparison", {}),
+        "history": snap.get("compare_history", []),
+    })
+
+
 @app.post("/api/reset")
 def post_reset():
     ss._state["total_reward"]   = 0.0
     ss._state["reward_history"].clear()
     ss._state["loss_history"].clear()
     ss._state["util_history"].clear()
+    ss._state["compare_history"].clear()
     return jsonify({"status": "reset", "t": time.time()})
 
 
@@ -226,11 +245,37 @@ def _mock_pump():
             total_reward=t * 0.3 + random.gauss(0, 0.5),
             loss=random.uniform(0.001, 0.5) if t > 10 else None,
         )
-        ss.push_path_counts({
+        mock_path_counts = {
             ACTION_PATH_A: random.randint(0, 5),
             ACTION_PATH_B: random.randint(0, 3),
             ACTION_PATH_C: random.randint(0, 1),
             ACTION_DROP:   random.randint(0, 1),
+        }
+        ss.push_path_counts(mock_path_counts)
+        dqn_reward = t * 0.35 + random.gauss(0, 0.4)
+        baseline_reward = t * 0.22 + random.gauss(0, 0.5)
+        delta = dqn_reward - baseline_reward
+        ss.push_comparison({
+            "enabled": True,
+            "routing_mode": "dqn",
+            "baseline_policy": "least_utilized",
+            "dqn_reward": round(dqn_reward, 3),
+            "baseline_reward": round(baseline_reward, 3),
+            "reward_delta": round(delta, 3),
+            "reward_delta_pct": round((delta / max(abs(baseline_reward), 0.001)) * 100.0, 2),
+            "winner": "dqn" if delta >= 0 else "baseline",
+            "dqn_path_counts": {
+                "PATH_A": mock_path_counts[ACTION_PATH_A],
+                "PATH_B": mock_path_counts[ACTION_PATH_B],
+                "PATH_C": mock_path_counts[ACTION_PATH_C],
+                "DROP": mock_path_counts[ACTION_DROP],
+            },
+            "baseline_path_counts": {
+                "PATH_A": random.randint(0, 5),
+                "PATH_B": random.randint(0, 4),
+                "PATH_C": random.randint(0, 2),
+                "DROP": random.randint(0, 2),
+            },
         })
         ss.push_util(sum(util[:4]) / 4)
         t += 1
@@ -262,6 +307,7 @@ def _file_pump():
                     ACTION_DROP:   pc.get("DROP",   0),
                 })
                 ss.push_util(d.get("avg_util", 0.0))
+                ss.push_comparison(d.get("comparison", {}))
                 # push flows directly into shared state
                 with ss._lock:
                     ss._state["active_flows"] = d.get("active_flows", {})

@@ -29,6 +29,9 @@ sys.path.insert(0, ROOT)
 from constants import (
     CONTROLLER_HOST, CONTROLLER_PORT,
     API_HOST, API_PORT, DASHBOARD_PORT,
+    ROUTING_MODE_DQN, ROUTING_MODE_BASELINE, BASELINE_POLICY_DEFAULT,
+    BASELINE_POLICY_SHORTEST_PATH, BASELINE_POLICY_ECMP_HASH,
+    BASELINE_POLICY_ROUND_ROBIN, BASELINE_POLICY_LEAST_UTILIZED, BASELINE_POLICY_RANDOM,
 )
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -60,13 +63,18 @@ _procs: list[subprocess.Popen] = []
 _threads: list[threading.Thread] = []
 
 
-def start_ryu() -> subprocess.Popen:
+def start_ryu(routing_mode: str, baseline_policy: str, compare_shadow: bool) -> subprocess.Popen:
     python = sys.executable
     controller = os.path.join(ROOT, "controller", "ryu_controller.py")
+    env = os.environ.copy()
+    env["SDN_ROUTING_MODE"] = routing_mode
+    env["SDN_BASELINE_POLICY"] = baseline_policy
+    env["SDN_COMPARE_SHADOW"] = "1" if compare_shadow else "0"
     proc = subprocess.Popen(
         [python, "-m", "ryu.cmd.manager",
          "--ofp-tcp-listen-port", str(CONTROLLER_PORT), controller],
         cwd=ROOT,
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
@@ -170,6 +178,29 @@ def main():
                         help="Duration of each traffic phase in seconds (default 60)")
     parser.add_argument("--no-dashboard", action="store_true",
                         help="Skip starting the dashboard server")
+    parser.add_argument(
+        "--routing-mode",
+        choices=[ROUTING_MODE_DQN, ROUTING_MODE_BASELINE],
+        default=ROUTING_MODE_DQN,
+        help="Policy that controls live routing (default: dqn).",
+    )
+    parser.add_argument(
+        "--baseline-policy",
+        choices=[
+            BASELINE_POLICY_SHORTEST_PATH,
+            BASELINE_POLICY_ECMP_HASH,
+            BASELINE_POLICY_ROUND_ROBIN,
+            BASELINE_POLICY_LEAST_UTILIZED,
+            BASELINE_POLICY_RANDOM,
+        ],
+        default=BASELINE_POLICY_DEFAULT,
+        help="Baseline policy used for baseline mode and shadow comparison.",
+    )
+    parser.add_argument(
+        "--no-shadow-compare",
+        action="store_true",
+        help="Disable shadow DQN-vs-baseline comparison metrics.",
+    )
     args = parser.parse_args()
 
     if os.geteuid() != 0:
@@ -180,10 +211,17 @@ def main():
     print("=" * 60)
     print("  AI-SDN IoT Training Run")
     print(f"  4 phases × {args.phase_secs}s = {4 * args.phase_secs}s total")
+    print(f"  routing mode     : {args.routing_mode}")
+    print(f"  baseline policy  : {args.baseline_policy}")
+    print(f"  shadow compare   : {'off' if args.no_shadow_compare else 'on'}")
     print("=" * 60)
 
     # 1. Ryu controller
-    ryu_proc = start_ryu()
+    ryu_proc = start_ryu(
+        routing_mode=args.routing_mode,
+        baseline_policy=args.baseline_policy,
+        compare_shadow=not args.no_shadow_compare,
+    )
     threading.Thread(
         target=_stream_output, args=(ryu_proc, "ryu"), daemon=True
     ).start()
