@@ -1,0 +1,28 @@
+# Python virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Model weights and runtime files (large / machine-specific)
+model_weights.pth
+
+# Runtime tmp files written during training
+/tmp/sdn_runtime_state.json
+/tmp/sdn_replay_buffer.pkl
+
+# Mininet / OvS leftovers
+*.log
+*.pid
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp

@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI-SDN IoT Dashboard</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    :root {
+      --bg:       #0f1117;
+      --panel:    #1a1d27;
+      --border:   #2a2d3e;
+      --text:     #e2e8f0;
+      --muted:    #64748b;
+      --accent:   #6366f1;
+      --green:    #22c55e;
+      --yellow:   #eab308;
+      --red:      #ef4444;
+      --pathA:    #38bdf8;
+      --pathB:    #a78bfa;
+      --pathC:    #fb923c;
+      --drop:     #f87171;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; font-size: 13px; }
+
+    header {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 20px; border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+    header h1 { font-size: 16px; font-weight: 600; }
+    #status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+    #status-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    #status-text { color: var(--muted); font-size: 12px; }
+    #uptime { margin-left: auto; color: var(--muted); font-size: 12px; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      grid-template-rows: auto auto auto;
+      gap: 12px; padding: 12px;
+    }
+
+    .panel {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 8px; padding: 14px;
+    }
+    .panel h2 { font-size: 11px; font-weight: 600; color: var(--muted);
+                text-transform: uppercase; letter-spacing: .08em; margin-bottom: 10px; }
+
+    /* ── Stat cards ── */
+    .stats-row { display: flex; gap: 8px; grid-column: 1 / -1; }
+    .stat-card {
+      flex: 1; background: var(--panel); border: 1px solid var(--border);
+      border-radius: 8px; padding: 12px 16px;
+    }
+    .stat-card .label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+    .stat-card .value { font-size: 24px; font-weight: 700; }
+    .stat-card .sub   { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+    /* ── Topology ── */
+    #topo-panel { grid-column: 1 / 2; grid-row: 2 / 4; }
+    #topo-svg { width: 100%; height: 340px; }
+
+    /* ── Reward chart ── */
+    #reward-panel { grid-column: 2 / 4; }
+    #reward-svg { width: 100%; height: 140px; }
+
+    /* ── Loss chart ── */
+    #loss-panel { grid-column: 2 / 3; }
+    #loss-svg { width: 100%; height: 120px; }
+
+    /* ── Path counts ── */
+    #paths-panel { grid-column: 3 / 4; }
+    .path-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .path-label { width: 56px; font-size: 11px; }
+    .path-bar-bg { flex: 1; height: 14px; background: var(--border); border-radius: 3px; overflow: hidden; }
+    .path-bar-fill { height: 100%; border-radius: 3px; transition: width .4s; }
+    .path-count { width: 28px; text-align: right; font-size: 11px; color: var(--muted); }
+
+    /* ── Active flows ── */
+    #flows-panel { grid-column: 1 / -1; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { color: var(--muted); font-weight: 500; padding: 4px 8px; text-align: left;
+         border-bottom: 1px solid var(--border); }
+    td { padding: 5px 8px; border-bottom: 1px solid var(--border); }
+    tr:last-child td { border-bottom: none; }
+    .badge {
+      display: inline-block; padding: 1px 6px; border-radius: 3px;
+      font-size: 10px; font-weight: 600;
+    }
+    .badge-A { background: #0c4a6e; color: var(--pathA); }
+    .badge-B { background: #2e1065; color: var(--pathB); }
+    .badge-C { background: #431407; color: var(--pathC); }
+    .badge-D { background: #450a0a; color: var(--drop); }
+    .badge-prio { background: #422006; color: #fbbf24; margin-left: 4px; }
+
+    /* ── Util bars ── */
+    #util-panel { grid-column: 2 / -1; }
+    .util-row { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+    .util-label { width: 80px; font-size: 11px; color: var(--muted); }
+    .util-bg { flex: 1; height: 10px; background: var(--border); border-radius: 2px; overflow: hidden; }
+    .util-fill { height: 100%; border-radius: 2px; transition: width .4s; }
+    .util-val { width: 36px; text-align: right; font-size: 11px; }
+
+    /* axes */
+    .axis text { fill: var(--muted); font-size: 10px; }
+    .axis path, .axis line { stroke: var(--border); }
+  </style>
+</head>
+<body>
+
+<header>
+  <div id="status-dot"></div>
+  <h1>AI-SDN IoT Dashboard</h1>
+  <span id="status-text">connecting…</span>
+  <span id="uptime">uptime: —</span>
+</header>
+
+<div class="grid">
+
+  <!-- Stat cards row -->
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="label">Epsilon (exploration)</div>
+      <div class="value" id="val-epsilon">—</div>
+      <div class="sub">1.0 → 0.01 over training</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Learn Steps</div>
+      <div class="value" id="val-steps">—</div>
+      <div class="sub">gradient updates so far</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Cumulative Reward</div>
+      <div class="value" id="val-reward">—</div>
+      <div class="sub">higher = better routing</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Last Loss</div>
+      <div class="value" id="val-loss">—</div>
+      <div class="sub">Huber / smooth-L1</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Active Flows</div>
+      <div class="value" id="val-flows">—</div>
+      <div class="sub">currently routed</div>
+    </div>
+  </div>
+
+  <!-- Topology -->
+  <div class="panel" id="topo-panel">
+    <h2>Network Topology</h2>
+    <svg id="topo-svg"></svg>
+  </div>
+
+  <!-- Reward chart -->
+  <div class="panel" id="reward-panel">
+    <h2>Cumulative Reward over Time</h2>
+    <svg id="reward-svg"></svg>
+  </div>
+
+  <!-- Loss chart -->
+  <div class="panel" id="loss-panel">
+    <h2>Training Loss</h2>
+    <svg id="loss-svg"></svg>
+  </div>
+
+  <!-- Path counts -->
+  <div class="panel" id="paths-panel">
+    <h2>Routing Decisions</h2>
+    <div id="path-bars"></div>
+  </div>
+
+  <!-- Link utilisation -->
+  <div class="panel" id="util-panel">
+    <h2>Link Utilisation</h2>
+    <div id="util-bars"></div>
+  </div>
+
+  <!-- Active flows table -->
+  <div class="panel" id="flows-panel">
+    <h2>Active Flows</h2>
+    <table>
+      <thead>
+        <tr><th>Flow</th><th>Path</th><th>Age</th><th>Priority</th></tr>
+      </thead>
+      <tbody id="flows-tbody"></tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+const API = 'http://127.0.0.1:5000';
+
+// ── Utility ──────────────────────────────────────────────────────────────────
+const fmt = (n, d=2) => n == null ? '—' : Number(n).toFixed(d);
+const fmtInt = n => n == null ? '—' : Math.round(n).toLocaleString();
+
+function setVal(id, v) { document.getElementById(id).textContent = v; }
+
+// ── Topology (static, fetched once) ─────────────────────────────────────────
+let topoData = null;
+let activeFlowPaths = {};   // "src->dst" → "A" | "B" | "C" | "D"
+
+function drawTopology(topo) {
+  const svg = d3.select('#topo-svg');
+  const W = svg.node().clientWidth || 340;
+  const H = 340;
+  svg.attr('viewBox', `0 0 ${W} ${H}`);
+
+  // Fixed positions for a clean 2-tier layout
+  const pos = {
+    h_sensor1:  [W*0.08, H*0.10], h_sensor2:  [W*0.08, H*0.28],
+    h_camera1:  [W*0.08, H*0.46], h_emerg:    [W*0.08, H*0.64],
+    h_sensor3:  [W*0.92, H*0.10], h_sensor4:  [W*0.92, H*0.28],
+    h_camera2:  [W*0.92, H*0.46], h_actuator: [W*0.92, H*0.64],
+    s1:         [W*0.22, H*0.37], s2:         [W*0.78, H*0.37],
+    s3:         [W*0.38, H*0.60], s4:         [W*0.62, H*0.60],
+    s5:         [W*0.50, H*0.82],
+    h_server1:  [W*0.38, H*0.95], h_server2:  [W*0.62, H*0.95],
+  };
+
+  const pathColor = { A: 'var(--pathA)', B: 'var(--pathB)', C: 'var(--pathC)', default: 'var(--border)' };
+
+  // Links
+  svg.selectAll('.link').remove();
+  svg.selectAll('.link')
+    .data(topo.links)
+    .join('line')
+    .attr('class', 'link')
+    .attr('x1', d => pos[d.source]?.[0] ?? 0)
+    .attr('y1', d => pos[d.source]?.[1] ?? 0)
+    .attr('x2', d => pos[d.target]?.[0] ?? 0)
+    .attr('y2', d => pos[d.target]?.[1] ?? 0)
+    .attr('stroke', d => pathColor[d.path] ?? pathColor.default)
+    .attr('stroke-width', d => d.path ? 2 : 1)
+    .attr('opacity', 0.6);
+
+  // Nodes
+  svg.selectAll('.node').remove();
+  const nodeColor = {
+    sensor:'var(--green)', camera:'var(--yellow)', emergency:'var(--red)',
+    actuator:'var(--red)', server:'#0ea5e9', switch:'var(--accent)'
+  };
+  const g = svg.selectAll('.node')
+    .data(topo.nodes)
+    .join('g')
+    .attr('class', 'node')
+    .attr('transform', d => `translate(${pos[d.id]?.[0] ?? 0},${pos[d.id]?.[1] ?? 0})`);
+
+  g.append('circle')
+    .attr('r', d => d.type === 'switch' ? 10 : 7)
+    .attr('fill', d => nodeColor[d.type] ?? '#888')
+    .attr('stroke', 'var(--border)').attr('stroke-width', 1.5);
+
+  g.append('text')
+    .attr('dy', d => d.id.startsWith('h_') ? -11 : 14)
+    .attr('text-anchor', 'middle')
+    .attr('font-size', 9)
+    .attr('fill', 'var(--muted)')
+    .text(d => d.id.replace('h_','').replace('_',''));
+}
+
+// ── Line chart helper ────────────────────────────────────────────────────────
+function drawLineChart(svgId, data, yKey, color) {
+  const svg = d3.select(`#${svgId}`);
+  const W = svg.node().clientWidth || 400, H = 120, M = {t:8,r:12,b:22,l:36};
+  svg.attr('viewBox', `0 0 ${W} ${H}`).selectAll('*').remove();
+
+  if (!data.length) return;
+
+  const x = d3.scaleLinear().domain([0, data.length-1]).range([M.l, W-M.r]);
+  const y = d3.scaleLinear()
+    .domain([d3.min(data, d=>d[yKey])*0.95, d3.max(data, d=>d[yKey])*1.05])
+    .nice().range([H-M.b, M.t]);
+
+  // Axes
+  svg.append('g').attr('class','axis').attr('transform',`translate(0,${H-M.b})`)
+    .call(d3.axisBottom(x).ticks(5).tickFormat(''));
+  svg.append('g').attr('class','axis').attr('transform',`translate(${M.l},0)`)
+    .call(d3.axisLeft(y).ticks(4).tickFormat(d3.format('.2~f')));
+
+  // Area
+  const area = d3.area()
+    .x((_,i)=>x(i)).y0(H-M.b).y1(d=>y(d[yKey])).curve(d3.curveBasis);
+  svg.append('path').datum(data).attr('fill', color).attr('opacity',.15).attr('d', area);
+
+  // Line
+  const line = d3.line().x((_,i)=>x(i)).y(d=>y(d[yKey])).curve(d3.curveBasis);
+  svg.append('path').datum(data).attr('fill','none')
+    .attr('stroke', color).attr('stroke-width', 1.5).attr('d', line);
+}
+
+// ── Path bars ────────────────────────────────────────────────────────────────
+function renderPathBars(counts) {
+  const total = Object.values(counts).reduce((a,b)=>a+b, 0) || 1;
+  const defs = [
+    { key:'PATH_A', label:'Path A', color:'var(--pathA)' },
+    { key:'PATH_B', label:'Path B', color:'var(--pathB)' },
+    { key:'PATH_C', label:'Path C', color:'var(--pathC)' },
+    { key:'DROP',   label:'Drop',   color:'var(--drop)'  },
+  ];
+  document.getElementById('path-bars').innerHTML = defs.map(d => `
+    <div class="path-bar-row">
+      <span class="path-label">${d.label}</span>
+      <div class="path-bar-bg">
+        <div class="path-bar-fill" style="width:${(counts[d.key]||0)/total*100}%;background:${d.color}"></div>
+      </div>
+      <span class="path-count">${counts[d.key]||0}</span>
+    </div>`).join('');
+}
+
+// ── Utilisation bars ─────────────────────────────────────────────────────────
+const UTIL_LABELS = [
+  'S1→S3','S1→S4','S2→S3','S2→S4',
+  'S3→S5','S4→S5','Crosslink'
+];
+function renderUtilBars(state) {
+  const vals = state.slice(0, 7);
+  document.getElementById('util-bars').innerHTML = vals.map((v,i) => {
+    const pct = Math.round(v*100);
+    const col = v > 0.8 ? 'var(--red)' : v > 0.5 ? 'var(--yellow)' : 'var(--green)';
+    return `<div class="util-row">
+      <span class="util-label">${UTIL_LABELS[i]}</span>
+      <div class="util-bg"><div class="util-fill" style="width:${pct}%;background:${col}"></div></div>
+      <span class="util-val">${pct}%</span>
+    </div>`;
+  }).join('');
+}
+
+// ── Flows table ──────────────────────────────────────────────────────────────
+function renderFlows(flows) {
+  const rows = Object.entries(flows);
+  const badgeClass = p =>
+    p.includes('A') ? 'badge-A' : p.includes('B') ? 'badge-B' :
+    p.includes('C') ? 'badge-C' : 'badge-D';
+
+  document.getElementById('flows-tbody').innerHTML = rows.length ? rows.map(([key,f]) => `
+    <tr>
+      <td>${key}</td>
+      <td><span class="badge ${badgeClass(f.path)}">${f.path}</span></td>
+      <td>${f.age_s}s</td>
+      <td>${f.priority ? '<span class="badge badge-prio">HIGH</span>' : '—'}</td>
+    </tr>`).join('') : `<tr><td colspan="4" style="color:var(--muted);text-align:center">No active flows</td></tr>`;
+}
+
+// ── SSE stream ───────────────────────────────────────────────────────────────
+let connected = false;
+
+function connect() {
+  const es = new EventSource(`${API}/api/stream`);
+
+  es.onopen = () => {
+    connected = true;
+    document.getElementById('status-dot').classList.add('live');
+    document.getElementById('status-text').textContent = 'live';
+  };
+
+  es.onerror = () => {
+    connected = false;
+    document.getElementById('status-dot').classList.remove('live');
+    document.getElementById('status-text').textContent = 'reconnecting…';
+    es.close();
+    setTimeout(connect, 3000);
+  };
+
+  es.onmessage = e => {
+    const d = JSON.parse(e.data);
+
+    // Stat cards
+    setVal('val-epsilon', fmt(d.epsilon, 4));
+    setVal('val-steps',   fmtInt(d.learn_steps));
+    setVal('val-reward',  fmt(d.total_reward, 2));
+    setVal('val-loss',    d.last_loss != null ? fmt(d.last_loss, 5) : '—');
+    setVal('val-flows',   Object.keys(d.active_flows).length);
+    setVal('uptime',      `uptime: ${Math.round(d.uptime_s)}s`);
+
+    // Charts
+    drawLineChart('reward-svg', d.reward_history, 'reward', 'var(--green)');
+    drawLineChart('loss-svg',   d.loss_history,   'loss',   'var(--accent)');
+
+    // Path bars & utils & flows
+    renderPathBars(d.path_counts);
+    if (d.current_state.length) renderUtilBars(d.current_state);
+    renderFlows(d.active_flows);
+
+    // Redraw topology with active-path colours if needed
+    if (topoData) drawTopology(topoData);
+  };
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+fetch(`${API}/api/topology`)
+  .then(r => r.json())
+  .then(t => { topoData = t; drawTopology(t); })
+  .catch(() => {});
+
+connect();
+</script>
+</body>
+</html>
