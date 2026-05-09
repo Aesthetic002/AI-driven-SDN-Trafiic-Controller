@@ -244,6 +244,7 @@ def _mock_pump():
             learn_steps=t,
             total_reward=t * 0.3 + random.gauss(0, 0.5),
             loss=random.uniform(0.001, 0.5) if t > 10 else None,
+            episode_count=1,
         )
         mock_path_counts = {
             ACTION_PATH_A: random.randint(0, 5),
@@ -278,6 +279,18 @@ def _mock_pump():
             },
         })
         ss.push_util(sum(util[:4]) / 4)
+        paths = ["PATH_A", "PATH_B", "PATH_C", "DROP"]
+        mock_flows = [
+            {"flow": "10.0.0.1->10.0.0.9",  "dqn_path": random.choice(paths[:3]),
+             "baseline_path": random.choice(paths[:3]), "priority": False, "age_s": t % 30},
+            {"flow": "10.0.0.3->10.0.0.9",  "dqn_path": random.choice(paths[:3]),
+             "baseline_path": random.choice(paths[:3]), "priority": False, "age_s": t % 20},
+            {"flow": "10.0.0.4->10.0.0.10", "dqn_path": random.choice(paths),
+             "baseline_path": "PATH_B",     "priority": True,  "age_s": t % 15},
+        ]
+        for f in mock_flows:
+            f["agreed"] = f["dqn_path"] == f["baseline_path"]
+        ss.push_flow_decisions(mock_flows)
         t += 1
         time.sleep(2)
 
@@ -298,7 +311,8 @@ def _file_pump():
                 ss.push_state(d.get("state", [0.0]*20),
                               d.get("feature_names", FEATURE_NAMES))
                 ss.push_agent(d.get("epsilon", 1.0), d.get("learn_steps", 0),
-                              d.get("total_reward", 0.0), d.get("last_loss"))
+                              d.get("total_reward", 0.0), d.get("last_loss"),
+                              episode_count=d.get("episode_count"))
                 pc = d.get("path_counts", {})
                 ss.push_path_counts({
                     ACTION_PATH_A: pc.get("PATH_A", 0),
@@ -308,7 +322,7 @@ def _file_pump():
                 })
                 ss.push_util(d.get("avg_util", 0.0))
                 ss.push_comparison(d.get("comparison", {}))
-                # push flows directly into shared state
+                ss.push_flow_decisions(d.get("flow_decisions", []))
                 with ss._lock:
                     ss._state["active_flows"] = d.get("active_flows", {})
         except (OSError, json.JSONDecodeError, KeyError):

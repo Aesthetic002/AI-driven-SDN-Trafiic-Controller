@@ -157,6 +157,10 @@ class IoTController(app_manager.RyuApp):
         if os.path.exists(WEIGHTS_PATH):
             self.agent.load(WEIGHTS_PATH)
             self.logger.info("Loaded weights from %s", WEIGHTS_PATH)
+        # Increment episode counter for this new run and persist immediately
+        self.agent.episode_count += 1
+        self.agent.save(WEIGHTS_PATH)
+        self.logger.info("Episode %d started", self.agent.episode_count)
         if os.path.exists(REPLAY_BUFFER_FILE):
             n = self.agent.load_buffer(REPLAY_BUFFER_FILE)
             self.logger.info("Loaded replay buffer: %d experiences", n)
@@ -355,12 +359,15 @@ class IoTController(app_manager.RyuApp):
             comparison_payload = self._build_comparison_payload()
 
             # ── Push to Flask API shared state ────────────────────────────────
+            flow_decisions = self._build_flow_decisions()
             shared_state.push_state(new_state, FEATURE_NAMES)
             shared_state.push_agent(
-                self.agent.epsilon, self.learn_steps, self.total_reward, loss
+                self.agent.epsilon, self.learn_steps, self.total_reward, loss,
+                episode_count=self.agent.episode_count,
             )
             shared_state.push_path_counts(self.path_counts)
             shared_state.push_flows(self.flow_table)
+            shared_state.push_flow_decisions(flow_decisions)
             shared_state.push_comparison(comparison_payload)
             avg_util = sum(new_state[:7]) / 7
             shared_state.push_util(avg_util)
@@ -496,32 +503,58 @@ class IoTController(app_manager.RyuApp):
         )
         dp.send_msg(out)
 
+    def _build_flow_decisions(self) -> list:
+        """Per-flow table showing what DQN chose vs what baseline would have chosen."""
+        now = time.time()
+        decisions = []
+        for flow_key, entry in self.flow_table.items():
+            shadow = self.shadow_flow_table.get(flow_key)
+            if self.routing_mode == ROUTING_MODE_DQN:
+                dqn_action  = entry.action
+                base_action = shadow.action if shadow else None
+            else:
+                base_action = entry.action
+                dqn_action  = shadow.action if shadow else None
+            decisions.append({
+                "flow":          f"{flow_key[0]}->{flow_key[1]}",
+                "dqn_path":      ACTION_NAMES.get(dqn_action,  "?") if dqn_action  is not None else "?",
+                "baseline_path": ACTION_NAMES.get(base_action, "?") if base_action is not None else "?",
+                "agreed":        (dqn_action == base_action)
+                                 if (dqn_action is not None and base_action is not None) else None,
+                "priority":      entry.is_priority,
+                "age_s":         round(now - entry.start_time, 1),
+            })
+        return decisions
+
     def _write_state_file(self, state: list, loss, avg_util: float, comparison: dict):
+        now = time.time()
         flows = {}
         for (src, dst), entry in self.flow_table.items():
             flows[f"{src}->{dst}"] = {
                 "action":   entry.action,
                 "path":     ACTION_NAMES.get(entry.action, "?"),
-                "age_s":    round(time.time() - entry.start_time, 1),
+                "age_s":    round(now - entry.start_time, 1),
                 "priority": entry.is_priority,
             }
         doc = {
-            "t":            time.time(),
-            "state":        state,
+            "t":             now,
+            "state":         state,
             "feature_names": FEATURE_NAMES,
-            "epsilon":      self.agent.epsilon,
-            "learn_steps":  self.learn_steps,
-            "total_reward": self.total_reward,
-            "last_loss":    loss,
+            "epsilon":       self.agent.epsilon,
+            "learn_steps":   self.learn_steps,
+            "total_reward":  self.total_reward,
+            "last_loss":     loss,
+            "episode_count": self.agent.episode_count,
             "path_counts": {
                 "PATH_A": self.path_counts.get(0, 0),
                 "PATH_B": self.path_counts.get(1, 0),
                 "PATH_C": self.path_counts.get(2, 0),
                 "DROP":   self.path_counts.get(3, 0),
             },
-            "active_flows": flows,
-            "avg_util":     avg_util,
-            "comparison":   comparison,
+            "active_flows":   flows,
+            "flow_decisions": self._build_flow_decisions(),
+            "avg_util":       avg_util,
+            "comparison":     comparison,
         }
         try:
             tmp = RUNTIME_STATE_FILE + ".tmp"

@@ -38,6 +38,12 @@ _state = {
     "comparison":       {},
     "compare_history":  deque(maxlen=200),
 
+    # Per-flow DQN vs baseline decisions
+    "flow_decisions":   [],
+
+    # Episode counter (incremented each time Ryu starts)
+    "episode_count":    0,
+
     # Timestamps
     "last_update":      None,
     "start_time":       time.time(),
@@ -54,12 +60,14 @@ def push_state(feature_vector: list[float], feature_names: list[str]):
 
 
 def push_agent(epsilon: float, learn_steps: int, total_reward: float,
-               loss: float | None):
+               loss: float | None, episode_count: int | None = None):
     with _lock:
         _state["epsilon"]      = epsilon
         _state["learn_steps"]  = learn_steps
         _state["total_reward"] = total_reward
         _state["last_loss"]    = loss
+        if episode_count is not None:
+            _state["episode_count"] = episode_count
         if loss is not None:
             _state["loss_history"].append({"t": time.time(), "loss": loss})
         _state["reward_history"].append({"t": time.time(), "reward": total_reward})
@@ -97,6 +105,11 @@ def push_util(avg_util: float):
         _state["util_history"].append({"t": time.time(), "util": avg_util})
 
 
+def push_flow_decisions(decisions: list):
+    with _lock:
+        _state["flow_decisions"] = list(decisions)
+
+
 def push_comparison(comparison: dict):
     with _lock:
         _state["comparison"] = dict(comparison or {})
@@ -129,6 +142,8 @@ def snapshot() -> dict:
             "util_history":   list(_state["util_history"]),
             "comparison":     dict(_state["comparison"]),
             "compare_history": list(_state["compare_history"]),
+            "flow_decisions": list(_state["flow_decisions"]),
+            "episode_count":  _state["episode_count"],
             "last_update":    _state["last_update"],
             "uptime_s":       round(uptime, 1),
         }

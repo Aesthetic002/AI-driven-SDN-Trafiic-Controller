@@ -179,8 +179,9 @@ class DQNAgent:
         self.optimizer = torch.optim.Adam(self.online.parameters(), lr=LR)
         self.replay    = ReplayBuffer()
 
-        self.epsilon   = EPS_START
-        self.steps     = 0
+        self.epsilon       = EPS_START
+        self.steps         = 0
+        self.episode_count = 0
 
     # ── Action selection ──────────────────────────────────────────────────────
 
@@ -236,11 +237,12 @@ class DQNAgent:
 
     def save(self, path: str):
         torch.save({
-            "online": self.online.state_dict(),
-            "target": self.target.state_dict(),
-            "optimizer": self.optimizer.state_dict(),
-            "epsilon": self.epsilon,
-            "steps": self.steps,
+            "online":        self.online.state_dict(),
+            "target":        self.target.state_dict(),
+            "optimizer":     self.optimizer.state_dict(),
+            "epsilon":       self.epsilon,
+            "steps":         self.steps,
+            "episode_count": self.episode_count,
         }, path)
 
     def load(self, path: str):
@@ -248,8 +250,9 @@ class DQNAgent:
         self.online.load_state_dict(ckpt["online"])
         self.target.load_state_dict(ckpt["target"])
         self.optimizer.load_state_dict(ckpt["optimizer"])
-        self.epsilon = ckpt["epsilon"]
-        self.steps   = ckpt["steps"]
+        self.epsilon       = ckpt["epsilon"]
+        self.steps         = ckpt["steps"]
+        self.episode_count = ckpt.get("episode_count", 0)
 
     def save_buffer(self, path: str):
         """Persist the replay buffer to disk so experiences survive between runs."""
