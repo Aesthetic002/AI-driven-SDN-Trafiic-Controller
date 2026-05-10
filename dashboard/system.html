@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>System Info — AI-SDN Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'base',
+      themeVariables: {
+        primaryColor: '#eef2ff', primaryTextColor: '#0f172a',
+        primaryBorderColor: '#6366f1', lineColor: '#94a3b8',
+        secondaryColor: '#ecfdf5', tertiaryColor: '#f0f9ff',
+        fontFamily: 'Inter, system-ui, sans-serif', fontSize: '13px'
+      }
+    });
+  </script>
+</head>
+<body>
+<nav id="main-nav"></nav>
+<main class="page">
+  <div class="page-header fade-in">
+    <h1 class="page-title">System Information</h1>
+    <p class="page-subtitle">Architecture reference, DQN configuration, state features, and reward design</p>
+  </div>
+
+  <!-- Architecture Diagram -->
+  <div class="panel fade-in fade-in-1" style="margin-bottom:20px">
+    <div class="panel-title">System Architecture</div>
+    <div class="mermaid" style="text-align:center">
+graph TB
+    subgraph IOT["IoT Cluster A"]
+        S1H1["sensor1"] --> S1
+        S1H2["sensor2"] --> S1
+        S1H3["camera1"] --> S1
+        S1H4["emergency"] --> S1
+    end
+    subgraph IOT2["IoT Cluster B"]
+        S2H1["sensor3"] --> S2
+        S2H2["sensor4"] --> S2
+        S2H3["camera2"] --> S2
+        S2H4["actuator"] --> S2
+    end
+    S1["S1 Access"] -->|"Path A 20Mbps 3ms"| S3["S3 Core Low-Lat"]
+    S1 -->|"Path B 20Mbps 7ms"| S4["S4 Core High-BW"]
+    S2["S2 Access"] -->|"Path A 20Mbps 4ms"| S3
+    S2 -->|"Path B 20Mbps 6ms"| S4
+    S3 -->|"50Mbps 2ms"| S5["S5 Aggregation"]
+    S4 -->|"100Mbps 3ms"| S5
+    S3 <-->|"Path C 50Mbps 5ms"| S4
+    S5 --> SRV1["server1"]
+    S5 --> SRV2["server2"]
+
+    subgraph AI["AI Control Plane"]
+        SC["Stats Collector"] -->|"20 features"| DQN["Dueling LSTM-DQN"]
+        DQN -->|"action 0-3"| RYU["Ryu Controller"]
+        RYU -->|"OpenFlow FlowMod"| S1
+        RYU -->|"OpenFlow FlowMod"| S2
+    end
+
+    subgraph MON["Monitoring"]
+        RYU -->|"JSON state"| FLASK["Flask API :5000"]
+        FLASK -->|"SSE stream"| DASH["Dashboard :8080"]
+    end
+
+    style S3 fill:#f0f9ff,stroke:#0ea5e9
+    style S4 fill:#f5f3ff,stroke:#8b5cf6
+    style DQN fill:#ecfdf5,stroke:#10b981
+    style RYU fill:#eef2ff,stroke:#6366f1
+    </div>
+  </div>
+
+  <div class="grid grid-2 fade-in fade-in-2" style="margin-bottom:20px">
+    <!-- DQN Architecture -->
+    <div class="panel">
+      <div class="panel-title">DQN Agent Architecture</div>
+      <div class="mermaid" style="text-align:center;margin-bottom:16px">
+graph LR
+    IN["Input: 10×20"] --> LSTM["LSTM 128×2"]
+    LSTM --> V["Value Head: 128→64→1"]
+    LSTM --> A["Advantage Head: 128→64→4"]
+    V --> Q["Q = V + A - mean(A)"]
+    A --> Q
+    Q --> ACT["Action: A / B / C / Drop"]
+    style LSTM fill:#eef2ff,stroke:#6366f1
+    style Q fill:#ecfdf5,stroke:#10b981
+      </div>
+      <table class="param-table">
+        <tr><td>Type</td><td>Dueling LSTM-DQN + Double-DQN</td></tr>
+        <tr><td>Input Shape</td><td>(batch, 10 steps, 20 features)</td></tr>
+        <tr><td>LSTM</td><td>hidden=128, 2 layers, dropout=0.2</td></tr>
+        <tr><td>Value Head</td><td>128 → 64 → 1 (V(s))</td></tr>
+        <tr><td>Advantage Head</td><td>128 → 64 → 4 (A(s,a))</td></tr>
+        <tr><td>Output</td><td>4 actions: Path A, B, C, Drop</td></tr>
+      </table>
+    </div>
+
+    <!-- Hyperparameters -->
+    <div class="panel">
+      <div class="panel-title">Training Hyperparameters</div>
+      <table class="param-table">
+        <tr><td>Optimizer</td><td>Adam, lr = 1e-4</td></tr>
+        <tr><td>Batch Size</td><td>64</td></tr>
+        <tr><td>Gamma (γ)</td><td>0.99</td></tr>
+        <tr><td>Epsilon</td><td>1.0 → 0.01 (×0.995/step)</td></tr>
+        <tr><td>Target Sync</td><td>Every 100 steps</td></tr>
+        <tr><td>Replay Buffer</td><td>10,000 capacity</td></tr>
+        <tr><td>Gradient Clip</td><td>max norm = 1.0</td></tr>
+        <tr><td>Loss Function</td><td>Smooth L1 (Huber)</td></tr>
+        <tr><td>Stats Interval</td><td>2 seconds</td></tr>
+        <tr><td>Sequence Length</td><td>10 timesteps</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- State Features -->
+  <div class="panel fade-in fade-in-3" style="margin-bottom:20px">
+    <div class="panel-title">20-Feature State Vector
+      <span style="font-size:11px;color:var(--text-muted);font-weight:400;text-transform:none;letter-spacing:0">
+        — contract between stats_collector and DQN agent
+      </span>
+    </div>
+    <div class="scroll-wrap" style="max-height:420px">
+      <table>
+        <thead><tr><th style="width:40px">Idx</th><th>Feature</th><th>Source</th><th>Range</th><th>Group</th></tr></thead>
+        <tbody>
+          <tr><td class="feature-idx">0</td><td>link_util_s1_s3</td><td>S1 port stats</td><td>Mbps/20</td><td><span class="badge b-A">Utilization</span></td></tr>
+          <tr><td class="feature-idx">1</td><td>link_util_s1_s4</td><td>S1 port stats</td><td>Mbps/20</td><td><span class="badge b-A">Utilization</span></td></tr>
+          <tr><td class="feature-idx">2</td><td>link_util_s2_s3</td><td>S2 port stats</td><td>Mbps/20</td><td><span class="badge b-A">Utilization</span></td></tr>
+          <tr><td class="feature-idx">3</td><td>link_util_s2_s4</td><td>S2 port stats</td><td>Mbps/20</td><td><span class="badge b-A">Utilization</span></td></tr>
+          <tr><td class="feature-idx">4</td><td>link_util_s3_s5</td><td>S3 port stats</td><td>Mbps/50</td><td><span class="badge b-A">Utilization</span></td></tr>
+          <tr><td class="feature-idx">5</td><td>link_util_s4_s5</td><td>S4 port stats</td><td>Mbps/100</td><td><span class="badge b-A">Utilization</span></td></tr>
+          <tr><td class="feature-idx">6</td><td>link_util_crosslink</td><td>S3↔S4 stats</td><td>Mbps/50</td><td><span class="badge b-C">Utilization</span></td></tr>
+          <tr><td class="feature-idx">7</td><td>active_flows_path_a</td><td>Flow table</td><td>count/20</td><td><span class="badge b-B">Flows</span></td></tr>
+          <tr><td class="feature-idx">8</td><td>active_flows_path_b</td><td>Flow table</td><td>count/20</td><td><span class="badge b-B">Flows</span></td></tr>
+          <tr><td class="feature-idx">9</td><td>active_flows_path_c</td><td>Flow table</td><td>count/20</td><td><span class="badge b-B">Flows</span></td></tr>
+          <tr><td class="feature-idx">10</td><td>packet_loss_path_a</td><td>TX vs RX</td><td>[0, 1]</td><td><span class="badge b-D">Quality</span></td></tr>
+          <tr><td class="feature-idx">11</td><td>packet_loss_path_b</td><td>TX vs RX</td><td>[0, 1]</td><td><span class="badge b-D">Quality</span></td></tr>
+          <tr><td class="feature-idx">12</td><td>jitter_path_a</td><td>Util variance</td><td>ms/50</td><td><span class="badge b-D">Quality</span></td></tr>
+          <tr><td class="feature-idx">13</td><td>jitter_path_b</td><td>Util variance</td><td>ms/50</td><td><span class="badge b-D">Quality</span></td></tr>
+          <tr><td class="feature-idx">14</td><td>bytes_path_a</td><td>Flow counters</td><td>bytes/1e7</td><td><span class="badge b-ok">Throughput</span></td></tr>
+          <tr><td class="feature-idx">15</td><td>bytes_path_b</td><td>Flow counters</td><td>bytes/1e7</td><td><span class="badge b-ok">Throughput</span></td></tr>
+          <tr><td class="feature-idx">16</td><td>time_of_day</td><td>System clock</td><td>sec/86400</td><td><span class="badge b-accent">Context</span></td></tr>
+          <tr><td class="feature-idx">17</td><td>util_trend</td><td>Delta avg util</td><td>[-1, 1]</td><td><span class="badge b-accent">Context</span></td></tr>
+          <tr><td class="feature-idx">18</td><td>priority_flag</td><td>DSCP field</td><td>{0, 1}</td><td><span class="badge b-hi">Context</span></td></tr>
+          <tr><td class="feature-idx">19</td><td>congestion_flag</td><td>Derived</td><td>{0, 1}</td><td><span class="badge b-hi">Context</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="grid grid-2 fade-in fade-in-4" style="margin-bottom:20px">
+    <!-- Reward Function -->
+    <div class="panel">
+      <div class="panel-title">Reward Function Design</div>
+      <div style="font-family:var(--font-mono);font-size:13px;line-height:2;color:var(--text-sec);margin-bottom:16px;padding:12px;background:var(--bg-alt);border-radius:var(--r-sm)">
+        R = 0.4×latency + 0.3×reliability + 0.2×throughput + 0.1×fairness
+      </div>
+      <table class="param-table">
+        <tr><td style="color:var(--pathA)">Latency (0.4)</td><td>1.0 − util on chosen path</td></tr>
+        <tr><td style="color:var(--green)">Reliability (0.3)</td><td>1.0 − packet loss on path</td></tr>
+        <tr><td style="color:var(--pathB)">Throughput (0.2)</td><td>Normalized bytes transferred</td></tr>
+        <tr><td style="color:var(--yellow)">Fairness (0.1)</td><td>1.0 − |util_A − util_B|</td></tr>
+        <tr><td style="color:var(--red)">Priority ×5</td><td>Emergency/actuator multiplier</td></tr>
+        <tr><td style="color:var(--drop)">Drop Penalty</td><td>−1.0 (unless congested: +0.1)</td></tr>
+      </table>
+    </div>
+
+    <!-- Routing Paths -->
+    <div class="panel">
+      <div class="panel-title">Routing Paths & Actions</div>
+      <table>
+        <thead><tr><th>Action</th><th>Route</th><th>Latency</th><th>BW</th></tr></thead>
+        <tbody>
+          <tr><td><span class="badge b-A">PATH A</span></td><td>S1/S2 → S3 → S5</td><td>~7ms</td><td>50 Mbps</td></tr>
+          <tr><td><span class="badge b-B">PATH B</span></td><td>S1/S2 → S4 → S5</td><td>~13ms</td><td>100 Mbps</td></tr>
+          <tr><td><span class="badge b-C">PATH C</span></td><td>S1/S2 → S3 → S4 → S5</td><td>&gt;13ms</td><td>varies</td></tr>
+          <tr><td><span class="badge b-D">DROP</span></td><td>—</td><td>—</td><td>—</td></tr>
+        </tbody>
+      </table>
+      <div class="panel-title" style="margin-top:20px">Traffic Phases</div>
+      <table>
+        <thead><tr><th>Phase</th><th>Time</th><th>Traffic</th></tr></thead>
+        <tbody>
+          <tr><td><span class="badge b-accent">1</span></td><td>0–60s</td><td>Sensors only — baseline</td></tr>
+          <tr><td><span class="badge b-accent">2</span></td><td>60–120s</td><td>+ Camera streams — BW surge</td></tr>
+          <tr><td><span class="badge b-accent">3</span></td><td>120–180s</td><td>+ Elephant + Emergency — stress</td></tr>
+          <tr><td><span class="badge b-accent">4</span></td><td>180–240s</td><td>Recovery — light traffic</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- API Reference -->
+  <div class="panel fade-in fade-in-4">
+    <div class="panel-title">REST API Endpoints</div>
+    <table class="param-table">
+      <tr><td style="font-family:var(--font-mono)">GET /api/snapshot</td><td>Everything in one call</td></tr>
+      <tr><td style="font-family:var(--font-mono)">GET /api/state</td><td>Current 20-feature vector</td></tr>
+      <tr><td style="font-family:var(--font-mono)">GET /api/agent</td><td>ε, steps, reward, loss</td></tr>
+      <tr><td style="font-family:var(--font-mono)">GET /api/flows</td><td>Active flow entries</td></tr>
+      <tr><td style="font-family:var(--font-mono)">GET /api/topology</td><td>Static network graph</td></tr>
+      <tr><td style="font-family:var(--font-mono)">GET /api/compare/current</td><td>DQN vs baseline live</td></tr>
+      <tr><td style="font-family:var(--font-mono)">GET /api/stream</td><td>Server-Sent Events (2s push)</td></tr>
+    </table>
+  </div>
+</main>
+
+<script src="shared.js"></script>
+<script>initPage('system', null);</script>
+</body>
+</html>

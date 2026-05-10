@@ -24,3 +24,8 @@ services:
       - ./collector:/app/collector
       - ./traffic:/app/traffic
       - ./constants.py:/app/constants.py
+
+  dashboard:
+    # Mount the entire dashboard folder — all HTML/CSS/JS edits appear instantly
+    volumes:
+      - ./dashboard:/usr/share/nginx/html

@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DQN vs Baseline — AI-SDN Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
+</head>
+<body>
+<nav id="main-nav"></nav>
+<main class="page">
+  <div class="page-header fade-in">
+    <h1 class="page-title">DQN vs Baseline Comparison</h1>
+    <p class="page-subtitle">Multi-dimensional analysis — why the AI agent outperforms classical routing</p>
+  </div>
+
+  <!-- Winner Banner -->
+  <div id="winner-banner" class="winner-banner fade-in fade-in-1" style="margin-bottom:20px">
+    <div class="wb-label">Current Leader</div>
+    <div class="wb-value" id="wb-who">—</div>
+    <div class="wb-sub" id="wb-detail">Waiting for data…</div>
+  </div>
+
+  <!-- 6 KPI Metric Cards -->
+  <div class="metric-row fade-in fade-in-2" style="margin-bottom:20px">
+    <div class="metric-card mc-green">
+      <div class="metric-head">Avg Latency (est.)</div>
+      <div class="metric-vs">
+        <div class="metric-side"><div class="metric-side-label">DQN</div>
+          <div class="metric-side-val" id="kpi-lat-dqn" style="color:var(--green)">—</div></div>
+        <div style="font-size:16px;color:var(--text-muted)">vs</div>
+        <div class="metric-side"><div class="metric-side-label">Baseline</div>
+          <div class="metric-side-val" id="kpi-lat-base" style="color:var(--pathB)">—</div></div>
+      </div>
+      <div class="metric-delta delta-neutral" id="kpi-lat-delta">—</div>
+    </div>
+    <div class="metric-card mc-red">
+      <div class="metric-head">Packet Loss Rate</div>
+      <div class="metric-vs">
+        <div class="metric-side"><div class="metric-side-label">Path A</div>
+          <div class="metric-side-val" id="kpi-loss-a" style="color:var(--pathA)">—</div></div>
+        <div style="font-size:16px;color:var(--text-muted)">/</div>
+        <div class="metric-side"><div class="metric-side-label">Path B</div>
+          <div class="metric-side-val" id="kpi-loss-b" style="color:var(--pathB)">—</div></div>
+      </div>
+      <div class="metric-delta delta-neutral" id="kpi-loss-avg">Avg —</div>
+    </div>
+    <div class="metric-card mc-yellow">
+      <div class="metric-head">Jain's Fairness Index</div>
+      <div class="metric-vs">
+        <div class="metric-side"><div class="metric-side-label">Link Balance</div>
+          <div class="metric-side-val" id="kpi-jfi" style="color:var(--yellow)">—</div></div>
+        <div style="font-size:16px;color:var(--text-muted)">/ 1.0</div>
+        <div class="metric-side"><div class="metric-side-label">Status</div>
+          <div class="metric-side-val" id="kpi-jfi-status" style="font-size:14px">—</div></div>
+      </div>
+      <div class="metric-delta delta-neutral" id="kpi-jfi-note">1.0 = perfectly balanced</div>
+    </div>
+    <div class="metric-card mc-accent">
+      <div class="metric-head">Jitter (Avg)</div>
+      <div class="metric-vs">
+        <div class="metric-side"><div class="metric-side-label">Path A</div>
+          <div class="metric-side-val" id="kpi-jit-a" style="color:var(--pathA)">—</div></div>
+        <div style="font-size:16px;color:var(--text-muted)">/</div>
+        <div class="metric-side"><div class="metric-side-label">Path B</div>
+          <div class="metric-side-val" id="kpi-jit-b" style="color:var(--pathB)">—</div></div>
+      </div>
+      <div class="metric-delta delta-neutral" id="kpi-jit-avg">Avg —</div>
+    </div>
+    <div class="metric-card mc-green">
+      <div class="metric-head">Throughput</div>
+      <div class="metric-vs">
+        <div class="metric-side"><div class="metric-side-label">Delivered</div>
+          <div class="metric-side-val" id="kpi-tput" style="color:var(--green)">—</div></div>
+        <div style="font-size:16px;color:var(--text-muted)"> </div>
+        <div class="metric-side"><div class="metric-side-label">Drop Rate</div>
+          <div class="metric-side-val" id="kpi-drop" style="color:var(--red)">—</div></div>
+      </div>
+      <div class="metric-delta delta-neutral" id="kpi-tput-note">—</div>
+    </div>
+    <div class="metric-card mc-accent">
+      <div class="metric-head">Win Rate / Agreement</div>
+      <div class="metric-vs">
+        <div class="metric-side"><div class="metric-side-label">DQN Wins</div>
+          <div class="metric-side-val" id="kpi-wr" style="color:var(--accent)">—</div></div>
+        <div style="font-size:16px;color:var(--text-muted)">/</div>
+        <div class="metric-side"><div class="metric-side-label">Agreement</div>
+          <div class="metric-side-val" id="kpi-agree" style="color:var(--green)">—</div></div>
+      </div>
+      <div class="metric-delta delta-neutral" id="kpi-wr-note">—</div>
+    </div>
+  </div>
+
+  <!-- Cumulative Reward Chart (KEPT) + Delta -->
+  <div class="grid grid-2 fade-in fade-in-3" style="margin-bottom:20px">
+    <div class="panel">
+      <div class="panel-title">Cumulative Reward Over Time
+        <span class="tip" title="Green=DQN, Purple dashed=Baseline. Shaded gap shows advantage.">?</span>
+      </div>
+      <div class="legend">
+        <div class="leg-item"><div class="leg-line" style="background:var(--green)"></div> DQN</div>
+        <div class="leg-item"><div class="leg-line" style="background:var(--pathB);border-top:2px dashed var(--pathB);height:0"></div> Baseline</div>
+      </div>
+      <svg id="dual-reward-svg" class="chart-svg" style="height:220px"></svg>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Reward Delta — DQN minus Baseline
+        <span class="tip" title="Green=DQN winning, Red=Baseline winning.">?</span>
+      </div>
+      <svg id="delta-svg" class="chart-svg" style="height:250px"></svg>
+    </div>
+  </div>
+
+  <!-- Path Distribution + Flow Decisions -->
+  <div class="grid grid-2 fade-in fade-in-4" style="margin-bottom:20px">
+    <div class="panel">
+      <div class="panel-title">Path Distribution — DQN vs Baseline</div>
+      <div class="legend">
+        <div class="leg-item"><div class="leg-dot" style="background:var(--accent);opacity:.9"></div> DQN</div>
+        <div class="leg-item"><div class="leg-dot" style="background:var(--text-muted);opacity:.4"></div> Baseline</div>
+      </div>
+      <svg id="path-bar-svg" class="chart-svg" style="height:240px"></svg>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Per-Flow Decision Comparison</div>
+      <div class="scroll-wrap" style="max-height:280px">
+        <table>
+          <thead><tr><th>Flow</th><th>DQN</th><th>Baseline</th><th>Match?</th><th>Priority</th></tr></thead>
+          <tbody id="flows-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- History -->
+  <div class="panel fade-in fade-in-4">
+    <div class="panel-title">Comparison History</div>
+    <div class="scroll-wrap">
+      <table>
+        <thead><tr><th>#</th><th>DQN</th><th>Baseline</th><th>Delta</th><th>Winner</th></tr></thead>
+        <tbody id="history-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script src="shared.js"></script>
+<script>
+initPage('comparison', function(d) {
+  const cmp = d.comparison||{}, hist = d.compare_history||[], dec = d.flow_decisions||[], st = d.current_state||[];
+
+  // Winner banner
+  const w = (cmp.winner||'tie').toUpperCase(), delta = Number(cmp.reward_delta??0);
+  const b = document.getElementById('winner-banner');
+  b.className = 'winner-banner fade-in'+(w==='BASELINE'?' losing':'');
+  setTxt('wb-who', w==='TIE'?'TIE':`${w} WINS`);
+  const pct = cmp.reward_delta_pct!=null ? ` (${fmt(cmp.reward_delta_pct,1)}%)` : '';
+  setTxt('wb-detail', `Reward Δ: ${delta>=0?'+':''}${fmt(delta,1)}${pct} · Policy: ${cmp.baseline_policy||'—'}`);
+
+  // KPI 1: Latency
+  const dqnLat = estimatedLatency(cmp.dqn_path_counts||d.path_counts||{});
+  const baseLat = estimatedLatency(cmp.baseline_path_counts||{});
+  setTxt('kpi-lat-dqn', dqnLat!=null ? fmt(dqnLat,1)+'ms' : '—');
+  setTxt('kpi-lat-base', baseLat!=null ? fmt(baseLat,1)+'ms' : '—');
+  const ldEl = document.getElementById('kpi-lat-delta');
+  if (dqnLat!=null&&baseLat!=null) {
+    const ld = dqnLat-baseLat;
+    ldEl.textContent = `${ld<=0?'':'+'} ${fmt(ld,1)}ms ${ld<=0?'✓ lower':'↑ higher'}`;
+    ldEl.className = 'metric-delta '+(ld<=0?'delta-pos':'delta-neg');
+  }
+
+  // KPI 2: Packet Loss
+  if (st.length>=14) {
+    setTxt('kpi-loss-a', fmtPct(st[10])); setTxt('kpi-loss-b', fmtPct(st[11]));
+    const avg = (st[10]+st[11])/2;
+    const el = document.getElementById('kpi-loss-avg');
+    el.textContent = `Avg ${fmtPct(avg)}`;
+    el.className = 'metric-delta '+(avg<.02?'delta-pos':avg<.1?'delta-neutral':'delta-neg');
+  }
+
+  // KPI 3: Jain's Fairness
+  if (st.length>=7) {
+    const jfi = jainFairnessIndex(st.slice(0,7));
+    setTxt('kpi-jfi', jfi!=null?fmt(jfi,3):'—');
+    const jEl = document.getElementById('kpi-jfi-status');
+    if (jfi!=null) { jEl.textContent = jfi>.9?'Excellent':jfi>.75?'Good':jfi>.5?'Fair':'Poor';
+      jEl.style.color = jfi>.9?'var(--green)':jfi>.75?'var(--yellow)':'var(--red)'; }
+  }
+
+  // KPI 4: Jitter
+  if (st.length>=14) {
+    setTxt('kpi-jit-a', fmtPct(st[12])); setTxt('kpi-jit-b', fmtPct(st[13]));
+    const avg = (st[12]+st[13])/2;
+    const el = document.getElementById('kpi-jit-avg');
+    el.textContent = `Avg ${fmtPct(avg)}`;
+    el.className = 'metric-delta '+(avg<.05?'delta-pos':'delta-neg');
+  }
+
+  // KPI 5: Throughput + Drop
+  const tp = throughputMB(st);
+  setTxt('kpi-tput', tp!=null?fmt(tp,1)+' MB':'—');
+  const dr = dropRate(cmp.dqn_path_counts||d.path_counts||{});
+  const drEl = document.getElementById('kpi-drop');
+  if (dr!=null) { drEl.textContent = fmtPct(dr); drEl.style.color = dr>0?'var(--red)':'var(--green)'; }
+
+  // KPI 6: Win Rate + Agreement
+  const wr = winRate(hist); const ar = agreementRate(dec);
+  setTxt('kpi-wr', wr!=null?`${(wr*100).toFixed(0)}%`:'—');
+  setTxt('kpi-agree', ar!=null?`${(ar*100).toFixed(0)}%`:'—');
+  const wrEl = document.getElementById('kpi-wr-note');
+  if (wr!=null) { wrEl.textContent = `${hist.filter(h=>(h.reward_delta||0)>0).length}/${hist.length} snapshots`;
+    wrEl.className = 'metric-delta '+(wr>.5?'delta-pos':'delta-neg'); }
+
+  // Charts
+  drawDualReward(hist); drawDelta(hist);
+  drawPathBars(cmp.dqn_path_counts||d.path_counts||{}, cmp.baseline_path_counts||{});
+  renderFlows(dec, d.active_flows||{}); renderHistory(hist);
+});
+
+function drawDualReward(h) {
+  const svg=clearSvg('#dual-reward-svg'), dims=chartDimensions(svg,{r:60}), {W,H,M}=dims;
+  if(!h||h.length<2){svg.append('text').attr('x',W/2).attr('y',H/2).attr('text-anchor','middle').attr('fill','var(--text-muted)').attr('font-size',12).text('Waiting…');return;}
+  const x=d3.scaleLinear().domain([0,h.length-1]).range([M.l,W-M.r]);
+  const all=h.flatMap(d=>[d.dqn_reward??0,d.baseline_reward??0]),p=(d3.max(all)-d3.min(all))*.08||2;
+  const y=d3.scaleLinear().domain([d3.min(all)-p,d3.max(all)+p]).nice().range([H-M.b,M.t]);
+  drawGridLines(svg,y,dims); drawAxes(svg,x,y,dims,{yFmt:d3.format('.0f')});
+  const last=h[h.length-1],ahead=(last?.dqn_reward??0)>=(last?.baseline_reward??0);
+  svg.append('path').datum(h).attr('fill',ahead?'var(--green)':'var(--red)').attr('opacity',.1)
+    .attr('d',d3.area().x((_,i)=>x(i)).y0(d=>y(d.baseline_reward??0)).y1(d=>y(d.dqn_reward??0)).curve(d3.curveBasis));
+  svg.append('path').datum(h).attr('fill','none').attr('stroke','var(--pathB)').attr('stroke-width',2).attr('stroke-dasharray','5,3')
+    .attr('d',d3.line().x((_,i)=>x(i)).y(d=>y(d.baseline_reward??0)).curve(d3.curveBasis));
+  svg.append('path').datum(h).attr('fill','none').attr('stroke','var(--green)').attr('stroke-width',2.5)
+    .attr('d',d3.line().x((_,i)=>x(i)).y(d=>y(d.dqn_reward??0)).curve(d3.curveBasis));
+  const lx=x(h.length-1);
+  svg.append('circle').attr('cx',lx).attr('cy',y(last?.dqn_reward??0)).attr('r',4).attr('fill','var(--green)');
+  svg.append('circle').attr('cx',lx).attr('cy',y(last?.baseline_reward??0)).attr('r',4).attr('fill','var(--pathB)');
+  const lx2=W-M.r+8,gap=(last?.dqn_reward??0)-(last?.baseline_reward??0);
+  svg.append('text').attr('x',lx2).attr('y',M.t+10).attr('fill','var(--green)').attr('font-size',10).attr('font-weight',600).text('DQN');
+  svg.append('text').attr('x',lx2).attr('y',M.t+24).attr('fill','var(--pathB)').attr('font-size',10).text('Baseline');
+  svg.append('text').attr('x',lx2).attr('y',M.t+42).attr('font-size',11).attr('font-weight',700)
+    .attr('fill',gap>=0?'var(--green)':'var(--red)').text(`Δ${gap>=0?'+':''}${gap.toFixed(1)}`);
+}
+
+function drawDelta(h) {
+  const svg=clearSvg('#delta-svg'), dims=chartDimensions(svg,{t:30}), {W,H,M}=dims;
+  if(!h||h.length<2){svg.append('text').attr('x',W/2).attr('y',H/2).attr('text-anchor','middle').attr('fill','var(--text-muted)').attr('font-size',12).text('Waiting…');return;}
+  const x=d3.scaleLinear().domain([0,h.length-1]).range([M.l,W-M.r]);
+  const ext=d3.extent(h,d=>d.reward_delta??0),yMin=Math.min(ext[0]*1.15,-.5),yMax=Math.max(ext[1]*1.15,.5);
+  const y=d3.scaleLinear().domain([yMin,yMax]).nice().range([H-M.b,M.t]);
+  drawGridLines(svg,y,dims,6);
+  svg.append('line').attr('x1',M.l).attr('x2',W-M.r).attr('y1',y(0)).attr('y2',y(0)).attr('stroke','var(--text-muted)').attr('stroke-width',1.5).attr('stroke-dasharray','4,3').attr('opacity',.6);
+  svg.append('path').datum(h).attr('fill','var(--green)').attr('opacity',.2).attr('d',d3.area().x((_,i)=>x(i)).y0(y(0)).y1(d=>y(Math.max(0,d.reward_delta??0))).curve(d3.curveBasis));
+  svg.append('path').datum(h).attr('fill','var(--red)').attr('opacity',.2).attr('d',d3.area().x((_,i)=>x(i)).y0(y(0)).y1(d=>y(Math.min(0,d.reward_delta??0))).curve(d3.curveBasis));
+  const last=h[h.length-1]?.reward_delta??0;
+  svg.append('path').datum(h).attr('fill','none').attr('stroke',last>=0?'var(--green)':'var(--yellow)').attr('stroke-width',2)
+    .attr('d',d3.line().x((_,i)=>x(i)).y(d=>y(d.reward_delta??0)).curve(d3.curveBasis));
+  drawAxes(svg,x,y,dims,{yTicks:6,yFmt:d3.format('.0f')});
+  svg.append('text').attr('x',W-M.r).attr('y',M.t-6).attr('text-anchor','end').attr('font-size',11).attr('font-weight',700)
+    .attr('fill',last>=0?'var(--green)':'var(--red)').text(`Δ = ${last>=0?'+':''}${last.toFixed(1)}`);
+}
+
+function drawPathBars(dC,bC) {
+  const svg=clearSvg('#path-bar-svg'), dims=chartDimensions(svg,{t:12,b:50}), {W,H,M}=dims;
+  const cats=['PATH_A','PATH_B','PATH_C','DROP'],labels=['Path A\n(S3)','Path B\n(S4)','Path C\n(cross)','Drop'];
+  const cols=['var(--pathA)','var(--pathB)','var(--pathC)','var(--drop)'];
+  const maxV=Math.max(...cats.map(c=>Math.max(dC[c]||0,bC[c]||0)),1);
+  const x0=d3.scaleBand().domain(cats).range([M.l,W-M.r]).padding(.25);
+  const x1=d3.scaleBand().domain(['d','b']).range([0,x0.bandwidth()]).padding(.08);
+  const y=d3.scaleLinear().domain([0,maxV*1.2]).nice().range([H-M.b,M.t]);
+  drawGridLines(svg,y,dims);
+  svg.append('g').attr('class','axis').attr('transform',`translate(${M.l},0)`).call(d3.axisLeft(y).ticks(5).tickFormat(d3.format('d')));
+  cats.forEach((c,i)=>{const dv=dC[c]||0,bv=bC[c]||0,gx=x0(c),col=cols[i];
+    if(H-M.b-y(dv)>0){svg.append('rect').attr('x',gx+x1('d')).attr('y',y(dv)).attr('width',x1.bandwidth()).attr('height',H-M.b-y(dv)).attr('fill',col).attr('opacity',.85).attr('rx',3);
+      if(dv>0)svg.append('text').attr('x',gx+x1('d')+x1.bandwidth()/2).attr('y',y(dv)-4).attr('text-anchor','middle').attr('font-size',10).attr('fill',col).attr('font-weight',600).text(dv);}
+    if(H-M.b-y(bv)>0){svg.append('rect').attr('x',gx+x1('b')).attr('y',y(bv)).attr('width',x1.bandwidth()).attr('height',H-M.b-y(bv)).attr('fill',col).attr('opacity',.2).attr('stroke',col).attr('stroke-width',1.5).attr('rx',3);
+      if(bv>0)svg.append('text').attr('x',gx+x1('b')+x1.bandwidth()/2).attr('y',y(bv)-4).attr('text-anchor','middle').attr('font-size',10).attr('fill',col).attr('opacity',.5).text(bv);}
+    const cx=gx+x0.bandwidth()/2,pts=labels[i].split('\n');
+    svg.append('text').attr('x',cx).attr('y',H-M.b+16).attr('text-anchor','middle').attr('font-size',11).attr('fill',col).text(pts[0]);
+    if(pts[1])svg.append('text').attr('x',cx).attr('y',H-M.b+30).attr('text-anchor','middle').attr('font-size',9).attr('fill',col).attr('opacity',.6).text(pts[1]);
+  });
+}
+
+function renderFlows(dec, af) {
+  let rows=[];
+  if(dec&&dec.length>0) rows=dec.map(d=>`<tr class="${d.agreed===false?'diverged':''}">
+    <td style="font-family:var(--font-mono);font-size:12px">${d.flow}</td>
+    <td>${pathBadge(d.dqn_path)}</td><td>${pathBadge(d.baseline_path)}</td>
+    <td>${d.agreed===null?'—':d.agreed?'<span class="badge b-ok">✓</span>':'<span class="badge b-diff">✗</span>'}</td>
+    <td>${d.priority?'<span class="badge b-hi">HIGH</span>':'—'}</td></tr>`);
+  else if(af&&Object.keys(af).length>0) rows=Object.entries(af).map(([k,f])=>`<tr>
+    <td style="font-family:var(--font-mono);font-size:12px">${k}</td>
+    <td>${pathBadge(f.path)}</td><td>—</td><td>—</td><td>${f.priority?'<span class="badge b-hi">HIGH</span>':'—'}</td></tr>`);
+  document.getElementById('flows-tbody').innerHTML=rows.length?rows.join(''):'<tr><td colspan="5" class="empty">No active flows</td></tr>';
+}
+
+function renderHistory(h) {
+  const el=document.getElementById('history-tbody');
+  if(!h||!h.length){el.innerHTML='<tr><td colspan="5" class="empty">No history yet</td></tr>';return;}
+  el.innerHTML=[...h].reverse().slice(0,30).map((r,i)=>{const d=r.reward_delta??0,w=d>0?'DQN':d<0?'Base':'Tie';
+    return `<tr><td style="color:var(--text-muted);font-size:11px">${h.length-i}</td>
+    <td style="color:var(--green);font-weight:600">${fmt(r.dqn_reward,1)}</td>
+    <td style="color:var(--pathB);font-weight:600">${fmt(r.baseline_reward,1)}</td>
+    <td style="color:${d>=0?'var(--green)':'var(--red)'}">${d>=0?'+':''}${fmt(d,1)}</td>
+    <td style="color:${d>0?'var(--green)':d<0?'var(--red)':'var(--text-muted)'};font-weight:700">${w}</td></tr>`;}).join('');
+}
+</script>
+</body>
+</html>

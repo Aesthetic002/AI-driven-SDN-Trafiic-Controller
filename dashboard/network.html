@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Network Monitor — AI-SDN Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
+</head>
+<body>
+<nav id="main-nav"></nav>
+<main class="page">
+  <div class="page-header fade-in">
+    <h1 class="page-title">Network Monitor</h1>
+    <p class="page-subtitle">Live view of the 5-switch IoT topology, link utilization, and active flows</p>
+  </div>
+
+  <div class="grid grid-23 fade-in fade-in-1" style="margin-bottom:20px">
+    <div class="panel">
+      <div class="panel-title">Network Topology <span class="tip" title="Blue=Path A, Purple=Path B, Orange=Path C crosslink">?</span></div>
+      <svg id="topo-svg" class="chart-svg" style="height:380px"></svg>
+    </div>
+    <div>
+      <div class="stats-row" style="margin-bottom:16px;grid-template-columns:1fr 1fr">
+        <div class="stat-card"><div class="stat-label">Avg Utilization</div><div class="stat-value" id="ns-util" style="font-size:20px">—</div><div class="stat-sub">across 7 links</div></div>
+        <div class="stat-card"><div class="stat-label">Congestion</div><div class="stat-value" id="ns-congest" style="font-size:20px">—</div><div class="stat-sub">any link &gt; 80%</div></div>
+        <div class="stat-card"><div class="stat-label">Active Flows</div><div class="stat-value" id="ns-flows" style="font-size:20px">—</div><div class="stat-sub">currently routed</div></div>
+        <div class="stat-card"><div class="stat-label">Priority Active</div><div class="stat-value" id="ns-prio" style="font-size:20px">—</div><div class="stat-sub">emergency / actuator</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Link Utilization <span class="tip" title="Red = congested (&gt;80%)">?</span></div>
+        <div id="util-bars"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Active Flows — sourced from flow_decisions (richer data) -->
+  <div class="panel fade-in fade-in-2" style="margin-bottom:20px">
+    <div class="panel-title">Active Flows <span class="tip" title="All flows with DQN and baseline path assignments">?</span></div>
+    <table>
+      <thead><tr><th>Flow (src → dst)</th><th>DQN Path</th><th>Baseline Path</th><th>Agreed?</th><th>Priority</th><th>Age</th></tr></thead>
+      <tbody id="flows-tbody"></tbody>
+    </table>
+  </div>
+
+  <div class="panel fade-in fade-in-3">
+    <div class="panel-title">Routing Summary</div>
+    <div class="stats-row" style="grid-template-columns:repeat(4,1fr)">
+      <div class="stat-card" style="border-left:3px solid var(--pathA)"><div class="stat-label">Path A (S3)</div><div class="stat-value" id="pc-a" style="font-size:22px;color:var(--pathA)">0</div><div class="stat-sub">low latency</div></div>
+      <div class="stat-card" style="border-left:3px solid var(--pathB)"><div class="stat-label">Path B (S4)</div><div class="stat-value" id="pc-b" style="font-size:22px;color:var(--pathB)">0</div><div class="stat-sub">high bandwidth</div></div>
+      <div class="stat-card" style="border-left:3px solid var(--pathC)"><div class="stat-label">Path C (cross)</div><div class="stat-value" id="pc-c" style="font-size:22px;color:var(--pathC)">0</div><div class="stat-sub">overflow route</div></div>
+      <div class="stat-card" style="border-left:3px solid var(--drop)"><div class="stat-label">Dropped</div><div class="stat-value" id="pc-d" style="font-size:22px;color:var(--drop)">0</div><div class="stat-sub">congestion ctrl</div></div>
+    </div>
+  </div>
+</main>
+
+<script src="shared.js"></script>
+<script>
+let topoData=null;
+fetch(`${API}/api/topology`).then(r=>r.json()).then(t=>{topoData=t;drawTopology(t);}).catch(()=>{});
+
+initPage('network', function(d) {
+  const st=d.current_state||[], dec=d.flow_decisions||[], af=d.active_flows||{};
+
+  if(st.length>=20){
+    const au=avgUtil(st),el=document.getElementById('ns-util');
+    el.textContent=fmtPct(au); el.style.color=au>.8?'var(--red)':au>.5?'var(--yellow)':'var(--green)';
+    const cg=st[19]>.5,cgEl=document.getElementById('ns-congest');
+    cgEl.textContent=cg?'YES':'NO'; cgEl.style.color=cg?'var(--red)':'var(--green)';
+    const pf=st[18]>.5,pfEl=document.getElementById('ns-prio');
+    pfEl.textContent=pf?'YES':'NO'; pfEl.style.color=pf?'var(--yellow)':'var(--text-muted)';
+  }
+  if(st.length>=7) renderUtilBars('util-bars',st);
+
+  // Flow count — use flow_decisions if available, else active_flows
+  const flowCount = dec.length || Object.keys(af).length;
+  setTxt('ns-flows', flowCount.toString());
+
+  const pc=d.path_counts||{};
+  setTxt('pc-a',pc.PATH_A??0); setTxt('pc-b',pc.PATH_B??0);
+  setTxt('pc-c',pc.PATH_C??0); setTxt('pc-d',pc.DROP??0);
+
+  // Active flows table — prefer flow_decisions (has richer data)
+  const tbody=document.getElementById('flows-tbody');
+  if(dec.length>0) {
+    tbody.innerHTML=dec.map(f=>`<tr class="${f.agreed===false?'diverged':''}">
+      <td style="font-family:var(--font-mono);font-size:12px">${f.flow}</td>
+      <td>${pathBadge(f.dqn_path)}</td>
+      <td>${pathBadge(f.baseline_path)}</td>
+      <td>${f.agreed===null?'—':f.agreed?'<span class="badge b-ok">✓</span>':'<span class="badge b-diff">✗</span>'}</td>
+      <td>${f.priority?'<span class="badge b-hi">HIGH</span>':'—'}</td>
+      <td style="color:var(--text-muted)">${f.age_s??'—'}s</td></tr>`).join('');
+  } else if(Object.keys(af).length>0) {
+    tbody.innerHTML=Object.entries(af).map(([k,f])=>`<tr>
+      <td style="font-family:var(--font-mono);font-size:12px">${k}</td>
+      <td>${pathBadge(f.path)}</td><td>—</td><td>—</td>
+      <td>${f.priority?'<span class="badge b-hi">HIGH</span>':'—'}</td>
+      <td style="color:var(--text-muted)">${f.age_s??'—'}s</td></tr>`).join('');
+  } else {
+    tbody.innerHTML='<tr><td colspan="6" class="empty">No active flows</td></tr>';
+  }
+
+  if(topoData) drawTopology(topoData,st);
+});
+
+function drawTopology(topo,state) {
+  const svg=d3.select('#topo-svg'),W=svg.node().clientWidth||500,H=380;
+  svg.attr('viewBox',`0 0 ${W} ${H}`).selectAll('*').remove();
+  const pos={h_sensor1:[W*.06,H*.06],h_sensor2:[W*.06,H*.20],h_camera1:[W*.06,H*.34],h_emerg:[W*.06,H*.48],
+    h_sensor3:[W*.94,H*.06],h_sensor4:[W*.94,H*.20],h_camera2:[W*.94,H*.34],h_actuator:[W*.94,H*.48],
+    s1:[W*.20,H*.27],s2:[W*.80,H*.27],s3:[W*.35,H*.52],s4:[W*.65,H*.52],s5:[W*.50,H*.72],
+    h_server1:[W*.38,H*.92],h_server2:[W*.62,H*.92]};
+  const pc={A:'var(--pathA)',B:'var(--pathB)',C:'var(--pathC)'},
+    nc={sensor:'var(--green)',camera:'var(--yellow)',emergency:'var(--red)',actuator:'var(--red)',server:'var(--pathA)',switch:'var(--accent)'};
+  const um={};
+  if(state&&state.length>=7){const lk=[['s1','s3'],['s1','s4'],['s2','s3'],['s2','s4'],['s3','s5'],['s4','s5'],['s3','s4']];
+    lk.forEach((k,i)=>{um[k.join('-')]=state[i];um[[...k].reverse().join('-')]=state[i];});}
+  topo.links.forEach(d=>{const[x1,y1]=pos[d.source]||[0,0],[x2,y2]=pos[d.target]||[0,0];
+    const key=`${d.source}-${d.target}`,u=um[key];
+    let col=pc[d.path]||'var(--border)',sw=d.path?2.5:1,op=d.path?.8:.35;
+    if(u!=null&&d.path){col=u>.8?'var(--red)':u>.5?'var(--yellow)':col;sw=2+u*3;}
+    svg.append('line').attr('x1',x1).attr('y1',y1).attr('x2',x2).attr('y2',y2)
+      .attr('stroke',col).attr('stroke-width',sw).attr('opacity',op).attr('stroke-linecap','round');
+    if(d.path)svg.append('text').attr('x',(x1+x2)/2).attr('y',(y1+y2)/2-6).attr('text-anchor','middle')
+      .attr('font-size',9).attr('font-weight',500).attr('fill',col).text(`P${d.path}${u!=null?' '+Math.round(u*100)+'%':''}`);});
+  topo.nodes.forEach(n=>{const[cx,cy]=pos[n.id]||[0,0],isSw=n.type==='switch',r=isSw?14:8;
+    svg.append('circle').attr('cx',cx).attr('cy',cy).attr('r',r).attr('fill',nc[n.type]||'#888').attr('stroke','var(--surface)').attr('stroke-width',2);
+    svg.append('text').attr('x',cx).attr('y',isSw?cy+5:cy-13).attr('text-anchor','middle')
+      .attr('font-size',isSw?10:9).attr('fill',isSw?'white':'var(--text-muted)').attr('font-weight',isSw?700:400).text(isSw?n.id:n.id.replace('h_',''));});
+}
+</script>
+</body>
+</html>

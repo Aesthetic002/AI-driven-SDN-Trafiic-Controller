@@ -1,731 +1,129 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI-SDN IoT Dashboard</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Overview — AI-SDN Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
   <script src="https://d3js.org/d3.v7.min.js"></script>
-  <style>
-    :root {
-      --bg:      #0f1117;
-      --panel:   #1a1d27;
-      --border:  #2a2d3e;
-      --text:    #e2e8f0;
-      --muted:   #64748b;
-      --accent:  #6366f1;
-      --green:   #22c55e;
-      --yellow:  #eab308;
-      --red:     #ef4444;
-      --pathA:   #38bdf8;
-      --pathB:   #a78bfa;
-      --pathC:   #fb923c;
-      --drop:    #f87171;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; font-size: 13px; }
-
-    /* ── Header ── */
-    header {
-      display: flex; align-items: center; gap: 10px;
-      padding: 10px 20px; border-bottom: 1px solid var(--border);
-      background: var(--panel); position: sticky; top: 0; z-index: 10;
-    }
-    header h1 { font-size: 15px; font-weight: 600; }
-    #status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
-    #status-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-    #status-text { color: var(--muted); font-size: 12px; }
-    #uptime      { color: var(--muted); font-size: 12px; }
-    #episode-badge {
-      margin-left: auto; background: #1e2d45; border: 1px solid var(--accent);
-      border-radius: 20px; padding: 3px 14px; font-size: 12px; font-weight: 700;
-      color: var(--accent); letter-spacing: .03em;
-    }
-
-    /* ── Grid ── */
-    .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; padding: 10px; }
-
-    .panel {
-      background: var(--panel); border: 1px solid var(--border);
-      border-radius: 8px; padding: 14px;
-    }
-    .panel h2 {
-      font-size: 10px; font-weight: 700; color: var(--muted);
-      text-transform: uppercase; letter-spacing: .09em; margin-bottom: 10px;
-      display: flex; align-items: center; gap: 6px;
-    }
-    .tip {
-      display: inline-flex; align-items: center; justify-content: center;
-      width: 13px; height: 13px; border-radius: 50%; background: var(--border);
-      color: var(--muted); font-size: 8px; font-weight: 700; cursor: default;
-      flex-shrink: 0;
-    }
-    .full { grid-column: 1 / -1; }
-
-    /* ── Stat cards ── */
-    .stats-row { display: flex; gap: 8px; grid-column: 1 / -1; }
-    .stat-card {
-      flex: 1; background: var(--panel); border: 1px solid var(--border);
-      border-radius: 8px; padding: 12px 14px;
-    }
-    .stat-card .lbl { font-size: 10px; color: var(--muted); margin-bottom: 3px; }
-    .stat-card .val { font-size: 21px; font-weight: 700; transition: color .3s; }
-    .stat-card .sub { font-size: 10px; color: var(--muted); margin-top: 2px; }
-
-    /* ── Charts ── */
-    #dual-reward-svg  { width: 100%; height: 140px; }
-    #topo-svg         { width: 100%; height: 290px; }
-    #routing-cmp-svg  { width: 100%; height: 290px; }
-    #delta-svg        { width: 100%; height: 290px; }
-    #loss-svg         { width: 100%; height: 120px; }
-
-    /* ── 3-col row assignments ── */
-    #topo-panel       { grid-column: 1 / 2; }
-    #routing-cmp-panel{ grid-column: 2 / 3; }
-    #delta-panel      { grid-column: 3 / 4; }
-    #loss-panel       { grid-column: 1 / 2; }
-    #util-panel       { grid-column: 2 / 4; }
-
-    /* ── Util bars ── */
-    .util-row { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
-    .util-lbl { width: 88px; font-size: 11px; color: var(--muted); }
-    .util-bg  { flex: 1; height: 10px; background: var(--border); border-radius: 2px; overflow: hidden; }
-    .util-fill{ height: 100%; border-radius: 2px; transition: width .4s; }
-    .util-val { width: 34px; text-align: right; font-size: 11px; }
-
-    /* ── Tables ── */
-    table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    th {
-      color: var(--muted); font-weight: 500; padding: 5px 8px;
-      text-align: left; border-bottom: 1px solid var(--border);
-      font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
-    }
-    td { padding: 5px 8px; border-bottom: 1px solid var(--border); }
-    tr:last-child td { border-bottom: none; }
-    tr.diverged { background: rgba(239,68,68,.07); }
-    tr.diverged:hover { background: rgba(239,68,68,.13); }
-
-    /* ── Badges ── */
-    .badge {
-      display: inline-block; padding: 1px 7px; border-radius: 3px;
-      font-size: 10px; font-weight: 700; white-space: nowrap;
-    }
-    .b-A    { background:#0c4a6e; color: var(--pathA); }
-    .b-B    { background:#2e1065; color: var(--pathB); }
-    .b-C    { background:#431407; color: var(--pathC); }
-    .b-D    { background:#450a0a; color: var(--drop);  }
-    .b-ok   { background:#14532d; color: var(--green); }
-    .b-diff { background:#450a0a; color: var(--red);   }
-    .b-hi   { background:#422006; color: #fbbf24;      }
-
-    /* ── Winner card ── */
-    .w-dqn  { color: var(--green);  }
-    .w-base { color: var(--red);    }
-    .w-tie  { color: var(--muted);  }
-
-    /* ── History table ── */
-    .h-dqn  { color: var(--green);  font-weight: 600; }
-    .h-base { color: var(--pathB);  font-weight: 600; }
-    .h-wdqn { color: var(--green);  font-weight: 700; font-size: 11px; }
-    .h-wbase{ color: var(--red);    font-weight: 700; font-size: 11px; }
-    .h-wtie { color: var(--muted);  font-size: 11px; }
-
-    /* ── Axes ── */
-    .axis text  { fill: var(--muted); font-size: 10px; }
-    .axis path,
-    .axis line  { stroke: var(--border); }
-
-    /* ── Empty state ── */
-    .empty { color: var(--muted); text-align: center; padding: 20px; font-size: 12px; }
-
-    /* ── Scrollable history ── */
-    .scroll-wrap { overflow-x: auto; max-height: 190px; overflow-y: auto; }
-    .scroll-wrap::-webkit-scrollbar { width: 4px; height: 4px; }
-    .scroll-wrap::-webkit-scrollbar-track { background: var(--border); }
-    .scroll-wrap::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 2px; }
-
-    /* ── Legend pill ── */
-    .legend { display: flex; gap: 14px; margin-bottom: 8px; flex-wrap: wrap; }
-    .leg-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); }
-    .leg-dot  { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
-    .leg-line { width: 18px; height: 2px; flex-shrink: 0; }
-  </style>
+  <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
 </head>
 <body>
+<nav id="main-nav"></nav>
+<main class="page">
+  <div class="page-header fade-in">
+    <h1 class="page-title">System Overview</h1>
+    <p class="page-subtitle">Live snapshot of the AI-driven SDN controller and network state</p>
+  </div>
 
-<header>
-  <div id="status-dot"></div>
-  <h1>AI-SDN IoT Dashboard</h1>
-  <span id="status-text">connecting…</span>
-  <span id="uptime">—</span>
-  <span id="episode-badge">Episode —</span>
-</header>
+  <div class="stats-row fade-in fade-in-1" style="margin-bottom:20px">
+    <div class="stat-card"><div class="stat-label">Epsilon (ε)</div><div class="stat-value" id="v-eps">—</div><div class="stat-sub">1.0 → 0.01 over training</div></div>
+    <div class="stat-card"><div class="stat-label">Learn Steps</div><div class="stat-value" id="v-steps">—</div><div class="stat-sub">gradient updates</div></div>
+    <div class="stat-card"><div class="stat-label">Last Loss</div><div class="stat-value" id="v-loss">—</div><div class="stat-sub">Huber / smooth-L1</div></div>
+    <div class="stat-card"><div class="stat-label">DQN Reward</div><div class="stat-value" id="v-dqn" style="color:var(--green)">—</div><div class="stat-sub">cumulative this session</div></div>
+    <div class="stat-card"><div class="stat-label">Baseline Reward</div><div class="stat-value" id="v-base" style="color:var(--pathB)">—</div><div class="stat-sub">shadow comparison</div></div>
+    <div class="stat-card"><div class="stat-label">Current Winner</div><div class="stat-value" id="v-winner">—</div><div class="stat-sub" id="v-delta-sub">Δ —</div></div>
+  </div>
 
-<div class="grid">
-
-  <!-- ─────────────────────────────── ROW 1: Stat cards ─────────────────────────── -->
-  <div class="stats-row">
-    <div class="stat-card">
-      <div class="lbl">Epsilon (ε)</div>
-      <div class="val" id="val-eps">—</div>
-      <div class="sub">1.0 → 0.01 over training</div>
+  <div class="grid grid-32 fade-in fade-in-2" style="margin-bottom:20px">
+    <div class="panel">
+      <div class="panel-title">DQN vs Baseline — Cumulative Reward <span class="tip" title="Green=DQN, Purple dashed=Baseline">?</span></div>
+      <div class="legend">
+        <div class="leg-item"><div class="leg-line" style="background:var(--green)"></div> DQN</div>
+        <div class="leg-item"><div class="leg-line" style="background:var(--pathB);border-top:2px dashed var(--pathB);height:0"></div> Baseline</div>
+      </div>
+      <svg id="reward-svg" class="chart-svg" style="height:200px"></svg>
     </div>
-    <div class="stat-card">
-      <div class="lbl">Learn Steps</div>
-      <div class="val" id="val-steps">—</div>
-      <div class="sub">gradient updates</div>
-    </div>
-    <div class="stat-card">
-      <div class="lbl">Last Loss</div>
-      <div class="val" id="val-loss">—</div>
-      <div class="sub">Huber / smooth-L1</div>
-    </div>
-    <div class="stat-card">
-      <div class="lbl">DQN Reward</div>
-      <div class="val" id="val-dqn-r" style="color:var(--green)">—</div>
-      <div class="sub">cumulative this session</div>
-    </div>
-    <div class="stat-card">
-      <div class="lbl">Baseline Reward</div>
-      <div class="val" id="val-base-r" style="color:var(--pathB)">—</div>
-      <div class="sub">shadow comparison</div>
-    </div>
-    <div class="stat-card">
-      <div class="lbl">Current Winner</div>
-      <div class="val" id="val-winner">—</div>
-      <div class="sub" id="val-delta-sub">Δ —</div>
+    <div class="panel">
+      <div class="panel-title">Network Topology <span class="tip" title="Blue=Path A, Purple=Path B, Orange=Path C">?</span></div>
+      <svg id="topo-svg" class="chart-svg" style="height:240px"></svg>
     </div>
   </div>
 
-  <!-- ─────────────────────────────── ROW 2: Dual reward chart ─────────────────── -->
-  <div class="panel full">
-    <h2>
-      DQN vs Baseline — Cumulative Reward Over Time
-      <span class="tip" title="Green solid = DQN. Purple dashed = Baseline shadow. Shaded gap shows who's ahead.">?</span>
-    </h2>
-    <div class="legend">
-      <div class="leg-item"><div class="leg-line" style="background:var(--green)"></div> DQN agent</div>
-      <div class="leg-item"><div class="leg-line" style="background:var(--pathB);border-top:2px dashed var(--pathB);height:0"></div> Baseline shadow</div>
-      <div class="leg-item"><div class="leg-dot" style="background:rgba(34,197,94,.25)"></div> DQN winning</div>
-      <div class="leg-item"><div class="leg-dot" style="background:rgba(239,68,68,.25)"></div> Baseline winning</div>
-    </div>
-    <svg id="dual-reward-svg"></svg>
-  </div>
-
-  <!-- ─────────────────────────────── ROW 3: Topology | Routing | Delta ─────────── -->
-  <div class="panel" id="topo-panel">
-    <h2>Network Topology
-      <span class="tip" title="Path A (blue) = S3 route. Path B (purple) = S4 route. Path C (orange) = crosslink.">?</span>
-    </h2>
-    <svg id="topo-svg"></svg>
-  </div>
-
-  <div class="panel" id="routing-cmp-panel">
-    <h2>
-      Routing Decisions — DQN vs Baseline
-      <span class="tip" title="Solid bars = DQN choices. Faded outlined bars = Baseline shadow choices. Same data, different intelligence.">?</span>
-    </h2>
-    <div class="legend">
-      <div class="leg-item"><div class="leg-dot" style="background:var(--accent);opacity:.9"></div> DQN (solid)</div>
-      <div class="leg-item"><div class="leg-dot" style="background:var(--muted);opacity:.5"></div> Baseline (faded)</div>
-    </div>
-    <svg id="routing-cmp-svg"></svg>
-  </div>
-
-  <div class="panel" id="delta-panel">
-    <h2>
-      Reward Delta — DQN minus Baseline
-      <span class="tip" title="Green fill = DQN is winning. Red fill = Baseline is ahead. Watch this turn positive as the agent learns.">?</span>
-    </h2>
-    <svg id="delta-svg"></svg>
-  </div>
-
-  <!-- ─────────────────────────────── ROW 4: Loss | Util ───────────────────────── -->
-  <div class="panel" id="loss-panel">
-    <h2>Training Loss (Huber)</h2>
-    <svg id="loss-svg"></svg>
-  </div>
-
-  <div class="panel" id="util-panel">
-    <h2>Live Link Utilisation
-      <span class="tip" title="Fraction of each link's capacity currently in use. Red = congested (>80%).">?</span>
-    </h2>
-    <div id="util-bars"></div>
-  </div>
-
-  <!-- ─────────────────────────────── ROW 5: Per-flow decisions ────────────────── -->
-  <div class="panel full">
-    <h2>
-      Per-Flow Decision Comparison — Where DQN and Baseline Disagree
-      <span class="tip" title="Red rows = DQN chose a different path than the baseline. These are the moments where the agent's intelligence is exercised.">?</span>
-    </h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Flow (src → dst)</th>
-          <th>DQN Path</th>
-          <th>Baseline Path</th>
-          <th>Agreed?</th>
-          <th>Priority</th>
-          <th>Age (s)</th>
-        </tr>
-      </thead>
-      <tbody id="flows-tbody"></tbody>
-    </table>
-  </div>
-
-  <!-- ─────────────────────────────── ROW 6: Training history ──────────────────── -->
-  <div class="panel full">
-    <h2>
-      Training History — Session Progression
-      <span class="tip" title="Each row = one snapshot. Watch DQN reward grow and the delta turn positive as the agent accumulates experience.">?</span>
-    </h2>
-    <div class="scroll-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>DQN Reward</th>
-            <th>Baseline Reward</th>
-            <th>Delta (DQN − Base)</th>
-            <th>Winner</th>
-          </tr>
-        </thead>
-        <tbody id="history-tbody"></tbody>
-      </table>
+  <div class="fade-in fade-in-3">
+    <div class="panel-title" style="padding:0 0 12px 0">Quick Navigation</div>
+    <div class="quick-links">
+      <a href="comparison.html" class="qlink">
+        <span class="qlink-icon"><i data-feather="activity"></i></span>
+        <span class="qlink-text">DQN vs Baseline — Full comparison with 6 KPIs</span>
+      </a>
+      <a href="network.html" class="qlink">
+        <span class="qlink-icon"><i data-feather="share-2"></i></span>
+        <span class="qlink-text">Network Monitor — Live topology, utilization, flows</span>
+      </a>
+      <a href="training.html" class="qlink">
+        <span class="qlink-icon"><i data-feather="trending-up"></i></span>
+        <span class="qlink-text">Training Analytics — Loss curves, epsilon, history</span>
+      </a>
+      <a href="system.html" class="qlink">
+        <span class="qlink-icon"><i data-feather="cpu"></i></span>
+        <span class="qlink-text">System Info — Architecture, hyperparameters, features</span>
+      </a>
     </div>
   </div>
+</main>
 
-</div><!-- .grid -->
-
+<script src="shared.js"></script>
 <script>
-const API = 'http://127.0.0.1:5000';
-const fmt     = (n, d=2)  => n == null ? '—' : Number(n).toFixed(d);
-const fmtInt  = n          => n == null ? '—' : Math.round(n).toLocaleString();
-const setTxt  = (id, v)    => { const e = document.getElementById(id); if (e) e.textContent = v; };
+let topoData=null;
+fetch(`${API}/api/topology`).then(r=>r.json()).then(t=>{topoData=t;drawTopo(t);}).catch(()=>{});
 
-// ── Path badge helper ────────────────────────────────────────────────────────
-function pathBadge(p) {
-  if (!p || p === '?') return `<span class="badge" style="background:#1e293b;color:var(--muted)">?</span>`;
-  if (p === 'PATH_A')  return `<span class="badge b-A">PATH A</span>`;
-  if (p === 'PATH_B')  return `<span class="badge b-B">PATH B</span>`;
-  if (p === 'PATH_C')  return `<span class="badge b-C">PATH C</span>`;
-  if (p === 'DROP')    return `<span class="badge b-D">DROP</span>`;
-  return `<span class="badge" style="background:#1e293b;color:var(--muted)">${p}</span>`;
-}
+initPage('overview', function(d) {
+  const eps=Number(d.epsilon), el=document.getElementById('v-eps');
+  el.textContent=fmt(eps,4); el.style.color=eps<.15?'var(--green)':eps<.5?'var(--yellow)':'var(--text-muted)';
+  setTxt('v-steps',fmtInt(d.learn_steps));
+  setTxt('v-loss',d.last_loss!=null?fmt(d.last_loss,5):'—');
+  const cmp=d.comparison||{};
+  setTxt('v-dqn',fmt(cmp.dqn_reward??d.total_reward,1));
+  setTxt('v-base',fmt(cmp.baseline_reward,1));
+  const w=(cmp.winner||'tie').toUpperCase(),wEl=document.getElementById('v-winner');
+  wEl.textContent=w; wEl.style.color=w==='DQN'?'var(--green)':w==='BASELINE'?'var(--red)':'var(--text-muted)';
+  const delta=Number(cmp.reward_delta??0);
+  setTxt('v-delta-sub',`Δ ${delta>=0?'+':''}${fmt(delta,1)}`);
+  drawRewardChart(d.compare_history||[]);
+  if(topoData)drawTopo(topoData);
+});
 
-// ── Topology ─────────────────────────────────────────────────────────────────
-let topoData = null;
-
-function drawTopology(topo) {
-  const svg = d3.select('#topo-svg');
-  const W = svg.node().clientWidth || 340, H = 290;
-  svg.attr('viewBox', `0 0 ${W} ${H}`);
-
-  const pos = {
-    h_sensor1: [W*.08,H*.08], h_sensor2:  [W*.08,H*.25],
-    h_camera1: [W*.08,H*.44], h_emerg:    [W*.08,H*.62],
-    h_sensor3: [W*.92,H*.08], h_sensor4:  [W*.92,H*.25],
-    h_camera2: [W*.92,H*.44], h_actuator: [W*.92,H*.62],
-    s1:[W*.22,H*.35], s2:[W*.78,H*.35],
-    s3:[W*.37,H*.58], s4:[W*.63,H*.58],
-    s5:[W*.50,H*.80],
-    h_server1:[W*.37,H*.95], h_server2:[W*.63,H*.95],
-  };
-  const pc = { A:'var(--pathA)', B:'var(--pathB)', C:'var(--pathC)', default:'var(--border)' };
-  const nc = { sensor:'var(--green)', camera:'var(--yellow)', emergency:'var(--red)',
-               actuator:'var(--red)', server:'#0ea5e9', switch:'var(--accent)' };
-
-  svg.selectAll('.link,.link-lbl,.node').remove();
-
-  svg.selectAll('.link').data(topo.links).join('line').attr('class','link')
-    .attr('x1',d=>pos[d.source]?.[0]??0).attr('y1',d=>pos[d.source]?.[1]??0)
-    .attr('x2',d=>pos[d.target]?.[0]??0).attr('y2',d=>pos[d.target]?.[1]??0)
-    .attr('stroke',d=>pc[d.path]??pc.default)
-    .attr('stroke-width',d=>d.path?2:1).attr('opacity',d=>d.path?.7:.45);
-
-  topo.links.filter(d=>d.path).forEach(d=>{
-    const [x1,y1]=pos[d.source]??[0,0], [x2,y2]=pos[d.target]??[0,0];
-    svg.append('text').attr('class','link-lbl')
-      .attr('x',(x1+x2)/2).attr('y',(y1+y2)/2-4)
-      .attr('text-anchor','middle').attr('font-size',8)
-      .attr('fill',pc[d.path]??'var(--muted)').text(`P${d.path}`);
-  });
-
-  const g = svg.selectAll('.node').data(topo.nodes).join('g').attr('class','node')
-    .attr('transform',d=>`translate(${pos[d.id]?.[0]??0},${pos[d.id]?.[1]??0})`);
-  g.append('circle')
-    .attr('r',d=>d.type==='switch'?11:7)
-    .attr('fill',d=>nc[d.type]??'#888')
-    .attr('stroke','var(--border)').attr('stroke-width',1.5);
-  g.append('text')
-    .attr('dy',d=>d.type==='switch'?4:-11)
-    .attr('text-anchor','middle')
-    .attr('font-size',d=>d.type==='switch'?8:8)
-    .attr('fill',d=>d.type==='switch'?'var(--bg)':'var(--muted)')
-    .text(d=>d.type==='switch'?d.id:d.id.replace('h_','').replace('_',''));
-}
-
-// ── Line chart helper ────────────────────────────────────────────────────────
-function drawLineChart(svgId, data, yKey, color, H=120) {
-  const svg = d3.select(`#${svgId}`);
-  const W = svg.node().clientWidth || 400;
-  const M = {t:8,r:12,b:22,l:42};
+function drawTopo(topo) {
+  const svg=d3.select('#topo-svg'),W=svg.node().clientWidth||340,H=240;
   svg.attr('viewBox',`0 0 ${W} ${H}`).selectAll('*').remove();
-
-  if (!data || data.length < 2) {
-    svg.append('text').attr('x',W/2).attr('y',H/2)
-      .attr('text-anchor','middle').attr('fill','var(--muted)').attr('font-size',11)
-      .text('Waiting for data…');
-    return;
-  }
-  const x = d3.scaleLinear().domain([0,data.length-1]).range([M.l,W-M.r]);
-  const ext = d3.extent(data,d=>d[yKey]);
-  const y = d3.scaleLinear().domain([Math.min(0,ext[0]*.95),ext[1]*1.05]).nice().range([H-M.b,M.t]);
-  svg.append('g').attr('class','axis').attr('transform',`translate(0,${H-M.b})`).call(d3.axisBottom(x).ticks(5).tickFormat(''));
-  svg.append('g').attr('class','axis').attr('transform',`translate(${M.l},0)`).call(d3.axisLeft(y).ticks(4).tickFormat(d3.format('.2~f')));
-  svg.append('path').datum(data).attr('fill',color).attr('opacity',.15)
-    .attr('d',d3.area().x((_,i)=>x(i)).y0(H-M.b).y1(d=>y(d[yKey])).curve(d3.curveBasis));
-  svg.append('path').datum(data).attr('fill','none').attr('stroke',color).attr('stroke-width',1.5)
-    .attr('d',d3.line().x((_,i)=>x(i)).y(d=>y(d[yKey])).curve(d3.curveBasis));
+  const pos={h_sensor1:[W*.07,H*.06],h_sensor2:[W*.07,H*.24],h_camera1:[W*.07,H*.42],h_emerg:[W*.07,H*.60],
+    h_sensor3:[W*.93,H*.06],h_sensor4:[W*.93,H*.24],h_camera2:[W*.93,H*.42],h_actuator:[W*.93,H*.60],
+    s1:[W*.22,H*.33],s2:[W*.78,H*.33],s3:[W*.37,H*.58],s4:[W*.63,H*.58],s5:[W*.50,H*.78],
+    h_server1:[W*.37,H*.95],h_server2:[W*.63,H*.95]};
+  const pc={A:'var(--pathA)',B:'var(--pathB)',C:'var(--pathC)'},
+    nc={sensor:'var(--green)',camera:'var(--yellow)',emergency:'var(--red)',actuator:'var(--red)',server:'var(--pathA)',switch:'var(--accent)'};
+  topo.links.forEach(d=>{const[x1,y1]=pos[d.source]||[0,0],[x2,y2]=pos[d.target]||[0,0];
+    svg.append('line').attr('x1',x1).attr('y1',y1).attr('x2',x2).attr('y2',y2)
+      .attr('stroke',pc[d.path]||'var(--border)').attr('stroke-width',d.path?2:1).attr('opacity',d.path?.7:.35);
+    if(d.path)svg.append('text').attr('x',(x1+x2)/2).attr('y',(y1+y2)/2-4).attr('text-anchor','middle').attr('font-size',8).attr('fill',pc[d.path]).text(`P${d.path}`);});
+  topo.nodes.forEach(n=>{const[cx,cy]=pos[n.id]||[0,0],r=n.type==='switch'?12:7;
+    svg.append('circle').attr('cx',cx).attr('cy',cy).attr('r',r).attr('fill',nc[n.type]||'#888').attr('stroke','var(--border)').attr('stroke-width',1.5);
+    svg.append('text').attr('x',cx).attr('y',n.type==='switch'?cy+4:cy-11).attr('text-anchor','middle').attr('font-size',8)
+      .attr('fill',n.type==='switch'?'white':'var(--text-muted)').attr('font-weight',n.type==='switch'?700:400).text(n.type==='switch'?n.id:n.id.replace('h_',''));});
 }
 
-// ── Dual reward chart ─────────────────────────────────────────────────────────
-function drawDualRewardChart(history) {
-  const svg = d3.select('#dual-reward-svg');
-  const W = svg.node().clientWidth || 900, H = 140;
-  const M = {t:10,r:90,b:28,l:52};
-  svg.attr('viewBox',`0 0 ${W} ${H}`).selectAll('*').remove();
-
-  if (!history || history.length < 2) {
-    svg.append('text').attr('x',W/2).attr('y',H/2)
-      .attr('text-anchor','middle').attr('fill','var(--muted)').attr('font-size',12)
-      .text('Waiting for comparison data — accumulates as flows are routed…');
-    return;
-  }
-
-  const x = d3.scaleLinear().domain([0,history.length-1]).range([M.l,W-M.r]);
-  const allV = history.flatMap(d=>[d.dqn_reward??0, d.baseline_reward??0]);
-  const pad  = (d3.max(allV)-d3.min(allV))*0.08 || 2;
-  const y = d3.scaleLinear().domain([d3.min(allV)-pad, d3.max(allV)+pad]).nice().range([H-M.b,M.t]);
-
-  svg.append('g').attr('class','axis').attr('transform',`translate(0,${H-M.b})`).call(d3.axisBottom(x).ticks(8).tickFormat(''));
-  svg.append('g').attr('class','axis').attr('transform',`translate(${M.l},0)`).call(d3.axisLeft(y).ticks(5).tickFormat(d3.format('.0f')));
-
-  const last = history[history.length-1];
-  const dqnAhead = (last?.dqn_reward??0) >= (last?.baseline_reward??0);
-
-  // Shaded area between the two lines
-  svg.append('path').datum(history)
-    .attr('fill', dqnAhead?'var(--green)':'var(--red)').attr('opacity',.12)
-    .attr('d', d3.area().x((_,i)=>x(i)).y0(d=>y(d.baseline_reward??0)).y1(d=>y(d.dqn_reward??0)).curve(d3.curveBasis));
-
-  // Baseline line (dashed, purple)
-  svg.append('path').datum(history).attr('fill','none')
-    .attr('stroke','var(--pathB)').attr('stroke-width',2).attr('stroke-dasharray','6,3')
+function drawRewardChart(h) {
+  const svg=clearSvg('#reward-svg'), dims=chartDimensions(svg,{r:60}), {W,H,M}=dims;
+  if(!h||h.length<2){svg.append('text').attr('x',W/2).attr('y',H/2).attr('text-anchor','middle').attr('fill','var(--text-muted)').attr('font-size',12).text('Waiting for data…');return;}
+  const x=d3.scaleLinear().domain([0,h.length-1]).range([M.l,W-M.r]);
+  const all=h.flatMap(d=>[d.dqn_reward??0,d.baseline_reward??0]),p=(d3.max(all)-d3.min(all))*.08||2;
+  const y=d3.scaleLinear().domain([d3.min(all)-p,d3.max(all)+p]).nice().range([H-M.b,M.t]);
+  drawGridLines(svg,y,dims); drawAxes(svg,x,y,dims,{yFmt:d3.format('.0f')});
+  const last=h[h.length-1],ahead=(last?.dqn_reward??0)>=(last?.baseline_reward??0);
+  svg.append('path').datum(h).attr('fill',ahead?'var(--green)':'var(--red)').attr('opacity',.1)
+    .attr('d',d3.area().x((_,i)=>x(i)).y0(d=>y(d.baseline_reward??0)).y1(d=>y(d.dqn_reward??0)).curve(d3.curveBasis));
+  svg.append('path').datum(h).attr('fill','none').attr('stroke','var(--pathB)').attr('stroke-width',2).attr('stroke-dasharray','5,3')
     .attr('d',d3.line().x((_,i)=>x(i)).y(d=>y(d.baseline_reward??0)).curve(d3.curveBasis));
-
-  // DQN line (solid, green)
-  svg.append('path').datum(history).attr('fill','none')
-    .attr('stroke','var(--green)').attr('stroke-width',2.5)
+  svg.append('path').datum(h).attr('fill','none').attr('stroke','var(--green)').attr('stroke-width',2.5)
     .attr('d',d3.line().x((_,i)=>x(i)).y(d=>y(d.dqn_reward??0)).curve(d3.curveBasis));
-
-  // End-point markers
-  const lx = x(history.length-1);
+  const lx=x(h.length-1),gap=(last?.dqn_reward??0)-(last?.baseline_reward??0),lx2=W-M.r+8;
   svg.append('circle').attr('cx',lx).attr('cy',y(last?.dqn_reward??0)).attr('r',4).attr('fill','var(--green)');
-  svg.append('circle').attr('cx',lx).attr('cy',y(last?.baseline_reward??0)).attr('r',4).attr('fill','var(--pathB)');
-
-  // Legend
-  const lx2 = W-M.r+8;
-  svg.append('line').attr('x1',lx2).attr('x2',lx2+18).attr('y1',M.t+2).attr('y2',M.t+2)
-    .attr('stroke','var(--green)').attr('stroke-width',2.5);
-  svg.append('text').attr('x',lx2+22).attr('y',M.t+6).attr('fill','var(--text)').attr('font-size',10).text('DQN');
-  svg.append('line').attr('x1',lx2).attr('x2',lx2+18).attr('y1',M.t+18).attr('y2',M.t+18)
-    .attr('stroke','var(--pathB)').attr('stroke-width',2).attr('stroke-dasharray','5,3');
-  svg.append('text').attr('x',lx2+22).attr('y',M.t+22).attr('fill','var(--text)').attr('font-size',10).text('Baseline');
-
-  // Current gap annotation
-  const gap = (last?.dqn_reward??0)-(last?.baseline_reward??0);
-  svg.append('text').attr('x',W-M.r+8).attr('y',M.t+42)
-    .attr('fill', gap>=0?'var(--green)':'var(--red)').attr('font-size',11).attr('font-weight',700)
-    .text(`Gap: ${gap>=0?'+':''}${gap.toFixed(1)}`);
+  svg.append('text').attr('x',lx2).attr('y',M.t+10).attr('fill','var(--green)').attr('font-size',10).attr('font-weight',600).text('DQN');
+  svg.append('text').attr('x',lx2).attr('y',M.t+26).attr('fill','var(--pathB)').attr('font-size',10).text('Baseline');
+  svg.append('text').attr('x',lx2).attr('y',M.t+46).attr('font-size',11).attr('font-weight',700)
+    .attr('fill',gap>=0?'var(--green)':'var(--red)').text(`Δ ${gap>=0?'+':''}${gap.toFixed(1)}`);
 }
-
-// ── Routing comparison grouped bar chart ─────────────────────────────────────
-function drawRoutingCmpChart(dqnC, baseC) {
-  const svg = d3.select('#routing-cmp-svg');
-  const W = svg.node().clientWidth || 340, H = 290;
-  const M = {t:38,r:10,b:52,l:30};
-  svg.attr('viewBox',`0 0 ${W} ${H}`).selectAll('*').remove();
-
-  const cats   = ['PATH_A','PATH_B','PATH_C','DROP'];
-  const labels = ['Path A\n(S3 fast)','Path B\n(S4 BW)','Path C\n(cross)','Drop'];
-  const cols   = ['var(--pathA)','var(--pathB)','var(--pathC)','var(--drop)'];
-
-  const maxV = Math.max(...cats.map(c=>Math.max(dqnC[c]||0, baseC[c]||0)), 1);
-
-  const x0 = d3.scaleBand().domain(cats).range([M.l,W-M.r]).padding(.25);
-  const x1 = d3.scaleBand().domain(['dqn','base']).range([0,x0.bandwidth()]).padding(.06);
-  const y  = d3.scaleLinear().domain([0,maxV*1.2]).nice().range([H-M.b,M.t]);
-
-  // Grid lines
-  y.ticks(5).forEach(t=>{
-    svg.append('line').attr('x1',M.l).attr('x2',W-M.r).attr('y1',y(t)).attr('y2',y(t))
-      .attr('stroke','var(--border)').attr('opacity',.6);
-  });
-
-  svg.append('g').attr('class','axis').attr('transform',`translate(${M.l},0)`)
-    .call(d3.axisLeft(y).ticks(5).tickFormat(d3.format('d')));
-
-  cats.forEach((cat,i)=>{
-    const dv = dqnC[cat]||0, bv = baseC[cat]||0;
-    const gx = x0(cat), col = cols[i];
-
-    // DQN bar (solid)
-    const dh = H-M.b-y(dv);
-    if (dh>0) {
-      svg.append('rect').attr('x',gx+x1('dqn')).attr('y',y(dv))
-        .attr('width',x1.bandwidth()).attr('height',dh)
-        .attr('fill',col).attr('opacity',.9).attr('rx',2);
-      if (dv>0) svg.append('text').attr('x',gx+x1('dqn')+x1.bandwidth()/2).attr('y',y(dv)-3)
-        .attr('text-anchor','middle').attr('font-size',9).attr('fill',col).text(dv);
-    }
-
-    // Baseline bar (faded + outline)
-    const bh = H-M.b-y(bv);
-    if (bh>0) {
-      svg.append('rect').attr('x',gx+x1('base')).attr('y',y(bv))
-        .attr('width',x1.bandwidth()).attr('height',bh)
-        .attr('fill',col).attr('opacity',.25)
-        .attr('stroke',col).attr('stroke-width',1.2).attr('rx',2);
-      if (bv>0) svg.append('text').attr('x',gx+x1('base')+x1.bandwidth()/2).attr('y',y(bv)-3)
-        .attr('text-anchor','middle').attr('font-size',9).attr('fill',col).attr('opacity',.65).text(bv);
-    }
-
-    // X-axis label (two lines)
-    const cx = gx+x0.bandwidth()/2;
-    const parts = labels[i].split('\n');
-    svg.append('text').attr('x',cx).attr('y',H-M.b+15)
-      .attr('text-anchor','middle').attr('font-size',10).attr('fill',col).text(parts[0]);
-    if (parts[1]) svg.append('text').attr('x',cx).attr('y',H-M.b+27)
-      .attr('text-anchor','middle').attr('font-size',8.5).attr('fill',col).attr('opacity',.7).text(parts[1]);
-  });
-
-  // Legend
-  const lx = M.l;
-  svg.append('rect').attr('x',lx).attr('y',M.t-26).attr('width',9).attr('height',9).attr('fill','var(--accent)').attr('opacity',.9).attr('rx',2);
-  svg.append('text').attr('x',lx+12).attr('y',M.t-18).attr('fill','var(--muted)').attr('font-size',9).text('DQN (solid)');
-  svg.append('rect').attr('x',lx+75).attr('y',M.t-26).attr('width',9).attr('height',9).attr('fill','var(--muted)').attr('opacity',.4).attr('rx',2);
-  svg.append('text').attr('x',lx+87).attr('y',M.t-18).attr('fill','var(--muted)').attr('font-size',9).text('Baseline (faded)');
-}
-
-// ── Reward delta chart ────────────────────────────────────────────────────────
-function drawDeltaChart(history) {
-  const svg = d3.select('#delta-svg');
-  const W = svg.node().clientWidth || 340, H = 290;
-  const M = {t:32,r:15,b:28,l:52};
-  svg.attr('viewBox',`0 0 ${W} ${H}`).selectAll('*').remove();
-
-  if (!history || history.length < 2) {
-    svg.append('text').attr('x',W/2).attr('y',H/2)
-      .attr('text-anchor','middle').attr('fill','var(--muted)').attr('font-size',11)
-      .text('Waiting for data…');
-    return;
-  }
-
-  const x  = d3.scaleLinear().domain([0,history.length-1]).range([M.l,W-M.r]);
-  const ext = d3.extent(history, d=>d.reward_delta??0);
-  const yMin = Math.min(ext[0]*1.15, -0.5);
-  const yMax = Math.max(ext[1]*1.15,  0.5);
-  const y = d3.scaleLinear().domain([yMin,yMax]).nice().range([H-M.b,M.t]);
-
-  // Grid lines
-  y.ticks(6).forEach(t=>{
-    svg.append('line').attr('x1',M.l).attr('x2',W-M.r).attr('y1',y(t)).attr('y2',y(t))
-      .attr('stroke','var(--border)').attr('opacity', t===0?.0:.5);
-  });
-
-  // Zero baseline
-  svg.append('line').attr('x1',M.l).attr('x2',W-M.r).attr('y1',y(0)).attr('y2',y(0))
-    .attr('stroke','var(--muted)').attr('stroke-width',1.5).attr('stroke-dasharray','4,3').attr('opacity',.8);
-
-  // Positive area (DQN winning)
-  svg.append('path').datum(history).attr('fill','var(--green)').attr('opacity',.28)
-    .attr('d', d3.area().x((_,i)=>x(i)).y0(y(0)).y1(d=>y(Math.max(0,d.reward_delta??0))).curve(d3.curveBasis));
-  // Negative area (baseline winning)
-  svg.append('path').datum(history).attr('fill','var(--red)').attr('opacity',.28)
-    .attr('d', d3.area().x((_,i)=>x(i)).y0(y(0)).y1(d=>y(Math.min(0,d.reward_delta??0))).curve(d3.curveBasis));
-
-  // Delta line
-  const last = history[history.length-1]?.reward_delta??0;
-  svg.append('path').datum(history).attr('fill','none')
-    .attr('stroke', last>=0?'var(--green)':'var(--yellow)').attr('stroke-width',2)
-    .attr('d', d3.line().x((_,i)=>x(i)).y(d=>y(d.reward_delta??0)).curve(d3.curveBasis));
-
-  // Axes
-  svg.append('g').attr('class','axis').attr('transform',`translate(${M.l},0)`)
-    .call(d3.axisLeft(y).ticks(6).tickFormat(d3.format('.0f')));
-  svg.append('g').attr('class','axis').attr('transform',`translate(0,${H-M.b})`)
-    .call(d3.axisBottom(x).ticks(5).tickFormat(''));
-
-  // Zone labels
-  const topY = M.t+18;
-  if (yMax > 0.5) svg.append('text').attr('x',W-M.r).attr('y',topY)
-    .attr('text-anchor','end').attr('font-size',9).attr('fill','var(--green)').attr('opacity',.75)
-    .text('DQN wins ▲');
-  if (yMin < -0.5) svg.append('text').attr('x',W-M.r).attr('y',H-M.b-6)
-    .attr('text-anchor','end').attr('font-size',9).attr('fill','var(--red)').attr('opacity',.75)
-    .text('Baseline wins ▼');
-
-  // Current Δ annotation
-  svg.append('text').attr('x',W-M.r).attr('y',M.t-8)
-    .attr('text-anchor','end').attr('font-size',11).attr('font-weight',700)
-    .attr('fill', last>=0?'var(--green)':'var(--red)')
-    .text(`Δ = ${last>=0?'+':''}${last.toFixed(1)}`);
-}
-
-// ── Utilisation bars ─────────────────────────────────────────────────────────
-const UTIL_LABELS = ['S1→S3 (A)','S1→S4 (B)','S2→S3 (A)','S2→S4 (B)','S3→S5 (A)','S4→S5 (B)','Crosslink (C)'];
-const UTIL_PCOLS  = ['var(--pathA)','var(--pathB)','var(--pathA)','var(--pathB)','var(--pathA)','var(--pathB)','var(--pathC)'];
-
-function renderUtilBars(state) {
-  document.getElementById('util-bars').innerHTML = state.slice(0,7).map((v,i)=>{
-    const pct = Math.round(v*100);
-    const col = v>.8?'var(--red)':v>.5?'var(--yellow)':UTIL_PCOLS[i];
-    return `<div class="util-row">
-      <span class="util-lbl">${UTIL_LABELS[i]}</span>
-      <div class="util-bg"><div class="util-fill" style="width:${pct}%;background:${col}"></div></div>
-      <span class="util-val" style="color:${col}">${pct}%</span>
-    </div>`;
-  }).join('');
-}
-
-// ── Per-flow decisions table ─────────────────────────────────────────────────
-function renderFlowDecisions(decisions, activeFlows) {
-  let rows = [];
-  if (decisions && decisions.length > 0) {
-    rows = decisions.map(d => {
-      const ag = d.agreed;
-      return `<tr class="${ag===false?'diverged':''}">
-        <td style="font-family:monospace;font-size:11px">${d.flow}</td>
-        <td>${pathBadge(d.dqn_path)}</td>
-        <td>${pathBadge(d.baseline_path)}</td>
-        <td>${ag===null
-          ? '<span class="badge" style="background:#1e293b;color:var(--muted)">—</span>'
-          : ag
-            ? '<span class="badge b-ok">✓ SAME</span>'
-            : '<span class="badge b-diff">✗ DIFF</span>'}</td>
-        <td>${d.priority?'<span class="badge b-hi">HIGH</span>':'—'}</td>
-        <td style="color:var(--muted)">${d.age_s??'—'}s</td>
-      </tr>`;
-    });
-  } else if (activeFlows && Object.keys(activeFlows).length > 0) {
-    rows = Object.entries(activeFlows).map(([k,f])=>`<tr>
-      <td style="font-family:monospace;font-size:11px">${k}</td>
-      <td>${pathBadge(f.path)}</td>
-      <td><span class="badge" style="background:#1e293b;color:var(--muted)">—</span></td>
-      <td>—</td>
-      <td>${f.priority?'<span class="badge b-hi">HIGH</span>':'—'}</td>
-      <td style="color:var(--muted)">${f.age_s??'—'}s</td>
-    </tr>`);
-  }
-  document.getElementById('flows-tbody').innerHTML = rows.length
-    ? rows.join('')
-    : `<tr><td colspan="6" class="empty">No active flows</td></tr>`;
-}
-
-// ── Training history table ────────────────────────────────────────────────────
-function renderHistory(history) {
-  if (!history || history.length === 0) {
-    document.getElementById('history-tbody').innerHTML =
-      `<tr><td colspan="5" class="empty">No history yet — start a training run</td></tr>`;
-    return;
-  }
-  const rows = [...history].reverse().slice(0,40).map((h,i)=>{
-    const delta  = h.reward_delta??0;
-    const winner = delta>0?'DQN':delta<0?'Baseline':'Tie';
-    const wc     = delta>0?'h-wdqn':delta<0?'h-wbase':'h-wtie';
-    return `<tr>
-      <td style="color:var(--muted);font-size:10px">${history.length-i}</td>
-      <td class="h-dqn">${fmt(h.dqn_reward,1)}</td>
-      <td class="h-base">${fmt(h.baseline_reward,1)}</td>
-      <td style="color:${delta>=0?'var(--green)':'var(--red)'}">${delta>=0?'+':''}${fmt(delta,1)}</td>
-      <td class="${wc}">${winner}</td>
-    </tr>`;
-  });
-  document.getElementById('history-tbody').innerHTML = rows.join('');
-}
-
-// ── Winner stat card ──────────────────────────────────────────────────────────
-function updateWinnerCard(cmp) {
-  if (!cmp || !Object.keys(cmp).length) return;
-  const winner  = (cmp.winner||'tie').toUpperCase();
-  const delta   = Number(cmp.reward_delta??0);
-  const deltaPct= cmp.reward_delta_pct!=null ? ` (${fmt(cmp.reward_delta_pct,1)}%)` : '';
-  const el = document.getElementById('val-winner');
-  el.textContent = winner;
-  el.className = `val ${winner==='DQN'?'w-dqn':winner==='BASELINE'?'w-base':'w-tie'}`;
-  setTxt('val-delta-sub', `Δ ${delta>=0?'+':''}${fmt(delta,1)}${deltaPct}`);
-  setTxt('val-dqn-r',  fmt(cmp.dqn_reward,1));
-  setTxt('val-base-r', fmt(cmp.baseline_reward,1));
-}
-
-// ── SSE ───────────────────────────────────────────────────────────────────────
-function connect() {
-  const es = new EventSource(`${API}/api/stream`);
-
-  es.onopen = () => {
-    document.getElementById('status-dot').classList.add('live');
-    document.getElementById('status-text').textContent = 'live';
-  };
-  es.onerror = () => {
-    document.getElementById('status-dot').classList.remove('live');
-    document.getElementById('status-text').textContent = 'reconnecting…';
-    es.close();
-    setTimeout(connect, 3000);
-  };
-  es.onmessage = e => {
-    const d = JSON.parse(e.data);
-
-    // Stat cards
-    const eps = Number(d.epsilon);
-    const epsEl = document.getElementById('val-eps');
-    epsEl.textContent = fmt(eps,4);
-    epsEl.style.color = eps<.15?'var(--green)':eps<.5?'var(--yellow)':'var(--muted)';
-    setTxt('val-steps', fmtInt(d.learn_steps));
-    setTxt('val-loss',  d.last_loss!=null ? fmt(d.last_loss,5) : '—');
-    setTxt('uptime', `uptime: ${Math.round(d.uptime_s)}s`);
-
-    if (d.episode_count) setTxt('episode-badge', `Episode ${d.episode_count}`);
-
-    const cmp = d.comparison || {};
-    updateWinnerCard(cmp);
-    if (!cmp.dqn_reward) setTxt('val-dqn-r', fmt(d.total_reward,1));
-
-    // Charts
-    drawDualRewardChart(d.compare_history || []);
-    drawDeltaChart(d.compare_history || []);
-    drawLineChart('loss-svg', d.loss_history, 'loss', 'var(--accent)');
-
-    // Routing comparison
-    const dqnC  = cmp.dqn_path_counts  || d.path_counts || {};
-    const baseC = cmp.baseline_path_counts || {};
-    drawRoutingCmpChart(dqnC, baseC);
-
-    // Util + flows + history
-    if (d.current_state && d.current_state.length >= 7) renderUtilBars(d.current_state);
-    renderFlowDecisions(d.flow_decisions || null, d.active_flows || {});
-    renderHistory(d.compare_history || []);
-
-    if (topoData) drawTopology(topoData);
-  };
-}
-
-// ── Init ─────────────────────────────────────────────────────────────────────
-fetch(`${API}/api/topology`)
-  .then(r=>r.json()).then(t=>{ topoData=t; drawTopology(t); }).catch(()=>{});
-
-connect();
 </script>
 </body>
 </html>
