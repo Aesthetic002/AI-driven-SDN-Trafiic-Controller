@@ -4,8 +4,11 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 
 const API = 'http://127.0.0.1:5000';
-let _dataCallback = null;
-let _es = null;
+let _dataCallback   = null;
+let _es             = null;
+let _lastDataTime   = 0;       // wall-clock ms of the last SSE message
+let _lastSnapshot   = null;    // most recent full snapshot
+const STALE_AFTER_MS = 6000;   // mark UI as stale after this gap
 
 /* ── Navigation ────────────────────────────────────────────────────────── */
 const NAV_PAGES = [
@@ -64,23 +67,82 @@ function applyTheme(theme) {
 }
 
 /* ── SSE ────────────────────────────────────────────────────────────────── */
+const SNAP_CACHE_KEY = 'sdn-last-snapshot';
+
+function _applySnapshot(d, source='sse') {
+  _lastDataTime = Date.now();
+  _lastSnapshot = d;
+  setStale(false);
+  // Cache the snapshot so the next page navigation can render instantly
+  // instead of waiting for the new SSE connection to establish.
+  try { sessionStorage.setItem(SNAP_CACHE_KEY, JSON.stringify(d)); } catch(e) {}
+  const ep = document.getElementById('nav-episode'); if (ep && d.episode_count) ep.textContent = `Episode ${d.episode_count}`;
+  const ut = document.getElementById('nav-uptime');  if (ut && d.uptime_s != null) ut.textContent = `${Math.round(d.uptime_s)}s`;
+  if (_dataCallback) _dataCallback(d);
+}
+
+function setStale(stale) {
+  document.documentElement.classList.toggle('is-stale', !!stale);
+  let banner = document.getElementById('stale-banner');
+  if (stale) {
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'stale-banner';
+      banner.innerHTML = '⚠️ <span>Data is stale — controller may have stopped. Reconnecting…</span>';
+      document.body.appendChild(banner);
+    }
+  } else if (banner) {
+    banner.remove();
+  }
+}
+
+/** Pull the latest snapshot via REST — used on tab focus + reconnect. */
+async function fetchSnapshot() {
+  try {
+    const r = await fetch(`${API}/api/snapshot`, { cache: 'no-store' });
+    if (!r.ok) return;
+    const d = await r.json();
+    _applySnapshot(d, 'fetch');
+  } catch(e) { /* ignore */ }
+}
+
 function connectSSE() {
   if (_es) { try { _es.close(); } catch(e) {} }
   _es = new EventSource(`${API}/api/stream`);
-  _es.onopen = () => { const d = document.getElementById('status-dot'); if (d) d.classList.add('live'); };
+  _es.onopen = () => {
+    const d = document.getElementById('status-dot'); if (d) d.classList.add('live');
+    // On reconnect, immediately pull a fresh snapshot — SSE won't fire until
+    // the next 2s tick, leaving the page on stale data otherwise.
+    fetchSnapshot();
+  };
   _es.onerror = () => {
     const d = document.getElementById('status-dot'); if (d) d.classList.remove('live');
+    // Don't flag stale on the first error — page might be loading or the
+    // connection is briefly retrying. The watchdog below handles persistent
+    // staleness based on actual time since last data.
     _es.close(); setTimeout(connectSSE, 3000);
   };
   _es.onmessage = (e) => {
-    try {
-      const d = JSON.parse(e.data);
-      const ep = document.getElementById('nav-episode'); if (ep && d.episode_count) ep.textContent = `Episode ${d.episode_count}`;
-      const ut = document.getElementById('nav-uptime');  if (ut && d.uptime_s != null) ut.textContent = `${Math.round(d.uptime_s)}s`;
-      if (_dataCallback) _dataCallback(d);
-    } catch(err) { console.warn('SSE parse error', err); }
+    try { _applySnapshot(JSON.parse(e.data), 'sse'); }
+    catch(err) { console.warn('SSE parse error', err); }
   };
 }
+
+/* Stale-data watchdog — runs once per second regardless of SSE messages. */
+setInterval(() => {
+  if (_lastDataTime && Date.now() - _lastDataTime > STALE_AFTER_MS) {
+    setStale(true);
+  }
+}, 1000);
+
+/* When the tab regains focus, force a fresh snapshot — fixes the case where
+   browser throttled background SSE delivery and the page is showing data
+   from the previous session / minutes ago. */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') fetchSnapshot();
+});
+window.addEventListener('focus', fetchSnapshot);
+window.addEventListener('pageshow', (e) => { if (e.persisted) fetchSnapshot(); });
 
 /* ── Init ───────────────────────────────────────────────────────────────── */
 function initPage(pageName, callback) {
@@ -88,6 +150,12 @@ function initPage(pageName, callback) {
   initTheme();
   initIcons();
   _dataCallback = callback || null;
+  // Render the previous page's last snapshot immediately so the new page
+  // appears with data rather than empty "—" placeholders before SSE connects.
+  try {
+    const cached = sessionStorage.getItem(SNAP_CACHE_KEY);
+    if (cached) _applySnapshot(JSON.parse(cached), 'cache');
+  } catch(e) {}
   connectSSE();
 }
 

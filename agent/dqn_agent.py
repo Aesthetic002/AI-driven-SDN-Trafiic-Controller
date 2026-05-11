@@ -116,18 +116,22 @@ class ReplayBuffer:
 
 # ── Reward shaping ────────────────────────────────────────────────────────────
 
-def compute_reward(state: list[float], action: int, next_state: list[float]) -> float:
+def compute_reward_components(state: list[float], action: int,
+                              next_state: list[float]) -> dict:
     """
-    Reward = weighted sum of four signals:
-      - latency    : lower link utilisation on chosen path → less queuing delay
-      - reliability: low packet loss on chosen path
-      - throughput : bytes transferred on chosen path
-      - fairness   : balanced utilisation across both paths
+    Reward breakdown for diagnostics + per-component DQN-vs-baseline comparison.
 
-    Priority multiplier applied when priority_flag (idx 18) is 1.
-    Drop action penalised unless all links are over 80% (congestion_flag idx 19).
+    Returns a dict with these keys (all floats, already weighted by R_*):
+      total       — final clipped scalar (matches compute_reward)
+      latency     — R_LATENCY     * latency_r     [* priority]
+      reliability — R_RELIABILITY * reliability_r [* priority]
+      throughput  — R_THROUGHPUT  * throughput_r  [* priority]
+      fairness    — R_FAIRNESS    * fairness_r    [* priority]
+
+    For ACTION_DROP the components are zero (no path chosen) and the total is
+    +0.1 if congested, else −1.0 — same as compute_reward.
     """
-    util_s3_s5   = next_state[4]   # normalised [0,1]
+    util_s3_s5   = next_state[4]
     util_s4_s5   = next_state[5]
     loss_path_a  = next_state[10]
     loss_path_b  = next_state[11]
@@ -135,6 +139,13 @@ def compute_reward(state: list[float], action: int, next_state: list[float]) -> 
     bytes_path_b = next_state[15]
     priority_flag    = next_state[18]
     congestion_flag  = next_state[19]
+
+    zero = {"total": 0.0, "latency": 0.0, "reliability": 0.0,
+            "throughput": 0.0, "fairness": 0.0}
+
+    if action == ACTION_DROP:
+        zero["total"] = 0.1 if congestion_flag else -1.0
+        return zero
 
     if action == ACTION_PATH_A:
         latency_r    = 1.0 - util_s3_s5
@@ -145,26 +156,33 @@ def compute_reward(state: list[float], action: int, next_state: list[float]) -> 
         reliability_r = 1.0 - loss_path_b
         throughput_r  = bytes_path_b
     elif action == ACTION_PATH_C:
-        # Cross-link: average of both paths, slight latency penalty
         latency_r    = 0.5 * (1.0 - util_s3_s5) + 0.5 * (1.0 - util_s4_s5) - 0.1
         reliability_r = 0.5 * (1.0 - loss_path_a) + 0.5 * (1.0 - loss_path_b)
         throughput_r  = 0.5 * (bytes_path_a + bytes_path_b)
-    else:  # ACTION_DROP
-        if congestion_flag:
-            return 0.1   # small positive: sensible under full congestion
-        return -1.0      # penalty for dropping without congestion
+    else:
+        return zero
 
     fairness_r = 1.0 - abs(util_s3_s5 - util_s4_s5)
+    mul = R_PRIORITY_MUL if priority_flag else 1.0
 
-    r = (R_LATENCY    * latency_r
-       + R_RELIABILITY * reliability_r
-       + R_THROUGHPUT  * throughput_r
-       + R_FAIRNESS    * fairness_r)
+    lat_w   = R_LATENCY     * latency_r     * mul
+    rel_w   = R_RELIABILITY * reliability_r * mul
+    thr_w   = R_THROUGHPUT  * throughput_r  * mul
+    fair_w  = R_FAIRNESS    * fairness_r    * mul
 
-    if priority_flag:
-        r *= R_PRIORITY_MUL
+    total = float(np.clip(lat_w + rel_w + thr_w + fair_w, -1.0, 5.0))
+    return {
+        "total":       total,
+        "latency":     float(lat_w),
+        "reliability": float(rel_w),
+        "throughput":  float(thr_w),
+        "fairness":    float(fair_w),
+    }
 
-    return float(np.clip(r, -1.0, 5.0))
+
+def compute_reward(state: list[float], action: int, next_state: list[float]) -> float:
+    """Backwards-compatible scalar reward — calls compute_reward_components."""
+    return compute_reward_components(state, action, next_state)["total"]
 
 
 # ── Agent ─────────────────────────────────────────────────────────────────────

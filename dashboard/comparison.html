@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="color-scheme" content="dark light">
+  <script>(function(){var t=localStorage.getItem('sdn-theme')||'light';document.documentElement.setAttribute('data-theme',t);document.documentElement.style.background=t==='dark'?'#0f172a':'#f8fafc';})();</script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DQN vs Baseline — AI-SDN Dashboard</title>
   <link rel="stylesheet" href="styles.css">
@@ -91,6 +93,21 @@
       </div>
       <div class="metric-delta delta-neutral" id="kpi-wr-note">—</div>
     </div>
+  </div>
+
+  <!-- Reward Component Breakdown — DQN vs Baseline per component -->
+  <div class="panel fade-in fade-in-2" style="margin-bottom:20px">
+    <div class="panel-title">
+      Reward Component Breakdown — DQN vs Baseline
+      <span class="tip" title="Each component (latency, reliability, throughput, fairness) is tracked separately for both policies. Shows WHERE DQN gains over baseline, not just the total.">?</span>
+    </div>
+    <div class="legend" style="margin-bottom:14px">
+      <div class="leg-item"><div class="leg-dot" style="background:var(--green)"></div> DQN cumulative</div>
+      <div class="leg-item"><div class="leg-dot" style="background:var(--pathB);opacity:.6"></div> Baseline cumulative</div>
+      <div class="leg-item" style="margin-left:auto;font-size:11px;color:var(--text-muted)">R = 0.4·lat + 0.3·rel + 0.2·thr + 0.1·fair</div>
+    </div>
+    <div class="metric-row" id="components-grid" style="margin-bottom:18px"></div>
+    <svg id="components-svg" class="chart-svg" style="height:220px"></svg>
   </div>
 
   <!-- Cumulative Reward Chart (KEPT) + Delta -->
@@ -213,11 +230,116 @@ initPage('comparison', function(d) {
   if (wr!=null) { wrEl.textContent = `${hist.filter(h=>(h.reward_delta||0)>0).length}/${hist.length} snapshots`;
     wrEl.className = 'metric-delta '+(wr>.5?'delta-pos':'delta-neg'); }
 
+  // Reward component breakdown
+  renderComponents(cmp.components || {});
+  drawComponentsChart(cmp.components || {});
+
   // Charts
   drawDualReward(hist); drawDelta(hist);
   drawPathBars(cmp.dqn_path_counts||d.path_counts||{}, cmp.baseline_path_counts||{});
   renderFlows(dec, d.active_flows||{}); renderHistory(hist);
 });
+
+const COMP_DEFS = [
+  { key:'latency',     label:'Latency',     hint:'1 − util on chosen path',    color:'var(--pathA)', weight:'×0.4' },
+  { key:'reliability', label:'Reliability', hint:'1 − packet loss on path',    color:'var(--green)', weight:'×0.3' },
+  { key:'throughput',  label:'Throughput',  hint:'normalised bytes delivered', color:'var(--pathB)', weight:'×0.2' },
+  { key:'fairness',    label:'Fairness',    hint:'1 − |util_A − util_B|',       color:'var(--yellow)',weight:'×0.1' },
+];
+
+function renderComponents(components) {
+  const el = document.getElementById('components-grid');
+  if (!el) return;
+  el.innerHTML = COMP_DEFS.map(def => {
+    const c = components[def.key] || {};
+    const dqn = c.dqn ?? 0, base = c.baseline ?? 0, delta = c.delta ?? (dqn - base);
+    const winner = (c.winner || (delta>0?'dqn':delta<0?'baseline':'tie')).toUpperCase();
+    const winnerCls = winner==='DQN' ? 'delta-pos' : winner==='BASELINE' ? 'delta-neg' : 'delta-neutral';
+    const winnerColor = winner==='DQN' ? 'var(--green)' : winner==='BASELINE' ? 'var(--red)' : 'var(--text-muted)';
+    return `<div class="metric-card" style="border-left:3px solid ${def.color}">
+      <div class="metric-head">${def.label} <span style="font-size:10px;color:var(--text-muted);font-weight:400">${def.weight}</span></div>
+      <div class="metric-vs">
+        <div class="metric-side">
+          <div class="metric-side-label">DQN</div>
+          <div class="metric-side-val" style="color:var(--green)">${fmt(dqn,2)}</div>
+        </div>
+        <div style="font-size:14px;color:var(--text-muted)">vs</div>
+        <div class="metric-side">
+          <div class="metric-side-label">Baseline</div>
+          <div class="metric-side-val" style="color:var(--pathB)">${fmt(base,2)}</div>
+        </div>
+      </div>
+      <div class="metric-delta ${winnerCls}" style="color:${winnerColor}">
+        ${delta>=0?'+':''}${fmt(delta,2)} · ${winner} wins
+      </div>
+      <div style="font-size:10px;color:var(--text-muted);margin-top:6px;text-align:center">${def.hint}</div>
+    </div>`;
+  }).join('');
+}
+
+function drawComponentsChart(components) {
+  const svg = clearSvg('#components-svg'), dims = chartDimensions(svg, {b:48,t:14}), {W,H,M} = dims;
+  if (!components || !Object.keys(components).length) {
+    svg.append('text').attr('x',W/2).attr('y',H/2).attr('text-anchor','middle')
+      .attr('fill','var(--text-muted)').attr('font-size',12).text('Waiting for component data…');
+    return;
+  }
+
+  const cats = COMP_DEFS;
+  const dqnVals  = cats.map(c => components[c.key]?.dqn ?? 0);
+  const baseVals = cats.map(c => components[c.key]?.baseline ?? 0);
+  const allVals  = [...dqnVals, ...baseVals, 0];
+  const yMin     = Math.min(...allVals);
+  const yMax     = Math.max(...allVals);
+  const pad      = (yMax - yMin) * 0.12 || 1;
+
+  const x0 = d3.scaleBand().domain(cats.map(c=>c.key)).range([M.l,W-M.r]).padding(.28);
+  const x1 = d3.scaleBand().domain(['d','b']).range([0,x0.bandwidth()]).padding(.08);
+  const y  = d3.scaleLinear().domain([Math.min(0,yMin-pad), yMax+pad]).nice().range([H-M.b,M.t]);
+
+  drawGridLines(svg, y, dims, 5);
+  // zero line
+  svg.append('line').attr('x1',M.l).attr('x2',W-M.r).attr('y1',y(0)).attr('y2',y(0))
+    .attr('stroke','var(--text-muted)').attr('stroke-width',1).attr('opacity',.4);
+
+  svg.append('g').attr('class','axis').attr('transform',`translate(${M.l},0)`)
+    .call(d3.axisLeft(y).ticks(5).tickFormat(d3.format('.1f')));
+
+  cats.forEach((def,i) => {
+    const dv = dqnVals[i], bv = baseVals[i], gx = x0(def.key);
+    const dY = Math.min(y(dv), y(0)), dH = Math.abs(y(dv) - y(0));
+    const bY = Math.min(y(bv), y(0)), bH = Math.abs(y(bv) - y(0));
+
+    if (dH > 0) {
+      svg.append('rect').attr('x', gx + x1('d')).attr('y', dY)
+        .attr('width', x1.bandwidth()).attr('height', dH)
+        .attr('fill', 'var(--green)').attr('opacity', .9).attr('rx', 3);
+      svg.append('text').attr('x', gx + x1('d') + x1.bandwidth()/2)
+        .attr('y', dv >= 0 ? dY - 4 : dY + dH + 11)
+        .attr('text-anchor','middle').attr('font-size',10).attr('font-weight',600)
+        .attr('fill','var(--green)').text(fmt(dv,2));
+    }
+    if (bH > 0) {
+      svg.append('rect').attr('x', gx + x1('b')).attr('y', bY)
+        .attr('width', x1.bandwidth()).attr('height', bH)
+        .attr('fill', 'var(--pathB)').attr('opacity', .55)
+        .attr('stroke','var(--pathB)').attr('stroke-width',1).attr('rx',3);
+      svg.append('text').attr('x', gx + x1('b') + x1.bandwidth()/2)
+        .attr('y', bv >= 0 ? bY - 4 : bY + bH + 11)
+        .attr('text-anchor','middle').attr('font-size',10).attr('font-weight',600)
+        .attr('fill','var(--pathB)').attr('opacity',.85).text(fmt(bv,2));
+    }
+
+    // category label
+    const cx = gx + x0.bandwidth()/2;
+    svg.append('text').attr('x', cx).attr('y', H - M.b + 18)
+      .attr('text-anchor','middle').attr('font-size',12).attr('font-weight',600)
+      .attr('fill', def.color).text(def.label);
+    svg.append('text').attr('x', cx).attr('y', H - M.b + 32)
+      .attr('text-anchor','middle').attr('font-size',9)
+      .attr('fill','var(--text-muted)').text(def.weight);
+  });
+}
 
 function drawDualReward(h) {
   const svg=clearSvg('#dual-reward-svg'), dims=chartDimensions(svg,{r:60}), {W,H,M}=dims;

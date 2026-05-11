@@ -57,6 +57,43 @@ def _wait_for_port(host, port, label, retries=30, interval=1.0):
     return False
 
 
+def _free_port(port: int, label: str) -> None:
+    """If a previous run left something bound to `port`, try to kill it.
+
+    Falls back gracefully when `lsof` isn't installed or the port is free.
+    Only kills processes owned by the invoking user (or root, if running sudo).
+    """
+    if not _port_open("127.0.0.1", port):
+        return
+    try:
+        out = subprocess.run(
+            ["lsof", "-ti", f":{port}"],
+            capture_output=True, text=True, timeout=3,
+        ).stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        out = ""
+    pids = [int(p) for p in out.split() if p.isdigit()]
+    if not pids:
+        return
+    print(f"[train] port {port} ({label}) busy — killing leftover pids: {pids}", flush=True)
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (PermissionError, ProcessLookupError):
+            pass
+    # Give the OS up to 3s to release the socket; SIGKILL stragglers.
+    for _ in range(15):
+        if not _port_open("127.0.0.1", port):
+            return
+        time.sleep(0.2)
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (PermissionError, ProcessLookupError):
+            pass
+    time.sleep(0.5)
+
+
 # ── Component launchers ───────────────────────────────────────────────────────
 
 _procs: list[subprocess.Popen] = []
@@ -108,17 +145,29 @@ def start_flask():
 
 def start_dashboard():
     import http.server
-    os.chdir(os.path.join(ROOT, "dashboard"))
-    handler = http.server.SimpleHTTPRequestHandler
+    from functools import partial
+    dash_dir = os.path.join(ROOT, "dashboard")
 
-    class _QuietHandler(handler):
+    class _QuietHandler(http.server.SimpleHTTPRequestHandler):
         def log_message(self, *a): pass   # suppress per-request logs
 
-    srv = http.server.HTTPServer(("", DASHBOARD_PORT), _QuietHandler)
+        def end_headers(self):
+            # Disable browser caching so navigating between dashboard pages
+            # always fetches fresh HTML/JS — otherwise stale tabs show stale
+            # episode counts after a new training run starts.
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
+            super().end_headers()
+
+    # Pin directory explicitly so request handling doesn't depend on os.getcwd()
+    # at request time. Mininet's setup later chdirs the process; without this,
+    # sub-pages (comparison/network/training/system) start 404'ing.
+    handler = partial(_QuietHandler, directory=dash_dir)
+    srv = http.server.HTTPServer(("", DASHBOARD_PORT), handler)
     t = threading.Thread(target=srv.serve_forever, daemon=True, name="dashboard")
     t.start()
     _threads.append(t)
-    os.chdir(ROOT)
     print(f"[train] Dashboard started on http://localhost:{DASHBOARD_PORT}")
 
 
@@ -216,6 +265,12 @@ def main():
     print(f"  shadow compare   : {'off' if args.no_shadow_compare else 'on'}")
     print("=" * 60)
 
+    # 0. Clear leftover services from a previous run that didn't shut down
+    #    cleanly. Without this, port 5000/8080/6633 binds fail with EADDRINUSE.
+    _free_port(CONTROLLER_PORT, "Ryu OpenFlow")
+    _free_port(API_PORT,        "Flask API")
+    _free_port(DASHBOARD_PORT,  "Dashboard")
+
     # 1. Ryu controller
     ryu_proc = start_ryu(
         routing_mode=args.routing_mode,
@@ -254,6 +309,25 @@ def main():
 
     elapsed = time.time() - t0
 
+    # Mininet is now stopped. Kill Ryu immediately — otherwise its stats loop
+    # keeps polling dead OvS bridges, accumulating zero rewards, and clobbering
+    # RUNTIME_STATE_FILE every 2 seconds. That's why the dashboard kept
+    # "moving" after the simulation ended.
+    print("[train] Stopping Ryu (training finished)...")
+    for proc in list(_procs):
+        try:
+            proc.terminate()
+            proc.wait(timeout=3)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+    _procs.clear()
+    # Give Flask's file-pump one cycle to read the final state Ryu wrote
+    # before it shut down, so the dashboard freezes on real numbers.
+    time.sleep(1.5)
+
     # 6. Summary
     print()
     print("=" * 60)
@@ -274,6 +348,15 @@ def main():
     except Exception:
         pass
     print("=" * 60)
+    print()
+    print(f"[train] Dashboard + API still running so you can review results.")
+    print(f"[train]   → http://localhost:{DASHBOARD_PORT}")
+    print(f"[train] Press Ctrl-C to shut down all services.")
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        pass
 
     cleanup()
 

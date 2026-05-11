@@ -256,6 +256,25 @@ def _mock_pump():
         dqn_reward = t * 0.35 + random.gauss(0, 0.4)
         baseline_reward = t * 0.22 + random.gauss(0, 0.5)
         delta = dqn_reward - baseline_reward
+
+        # Per-component reward breakdown — DQN tends to do better on latency
+        # and fairness once it learns; baseline matches throughput/reliability.
+        learn_factor = min(1.0, t / 200.0)   # ramps up over first ~7 minutes
+        def _comp(d_base, b_base, d_jitter=0.04, advantage=0.10):
+            d = d_base * t + random.gauss(0, d_jitter * t)
+            b = b_base * t + random.gauss(0, d_jitter * t)
+            # Once DQN starts learning, give it a steadily growing edge
+            d += advantage * learn_factor * t
+            return round(d, 3), round(b, 3), round(d - b, 3)
+
+        d_lat,  b_lat,  e_lat  = _comp(0.16, 0.13, advantage=0.06)
+        d_rel,  b_rel,  e_rel  = _comp(0.10, 0.10, advantage=0.02)
+        d_thr,  b_thr,  e_thr  = _comp(0.06, 0.05, advantage=0.01)
+        d_fair, b_fair, e_fair = _comp(0.03, 0.02, advantage=0.04)
+
+        def _winner(a, b):
+            return "dqn" if a > b else "baseline" if b > a else "tie"
+
         ss.push_comparison({
             "enabled": True,
             "routing_mode": "dqn",
@@ -276,6 +295,12 @@ def _mock_pump():
                 "PATH_B": random.randint(0, 4),
                 "PATH_C": random.randint(0, 2),
                 "DROP": random.randint(0, 2),
+            },
+            "components": {
+                "latency":     {"dqn": d_lat,  "baseline": b_lat,  "delta": e_lat,  "winner": _winner(d_lat,  b_lat)},
+                "reliability": {"dqn": d_rel,  "baseline": b_rel,  "delta": e_rel,  "winner": _winner(d_rel,  b_rel)},
+                "throughput":  {"dqn": d_thr,  "baseline": b_thr,  "delta": e_thr,  "winner": _winner(d_thr,  b_thr)},
+                "fairness":    {"dqn": d_fair, "baseline": b_fair, "delta": e_fair, "winner": _winner(d_fair, b_fair)},
             },
         })
         ss.push_util(sum(util[:4]) / 4)

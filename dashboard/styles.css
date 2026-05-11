@@ -57,7 +57,9 @@
 
 /* ── Reset ─────────────────────────────────────────────────────────────── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html{scroll-behavior:smooth}
+/* `html` carries the background too so the brief moment between pages
+   doesn't flash white before <body> styles apply. */
+html{scroll-behavior:smooth;background:var(--bg);color:var(--text)}
 body{font-family:var(--font-body);font-size:14px;line-height:1.6;color:var(--text);
   background:var(--bg);transition:background .3s var(--ease),color .3s var(--ease);
   -webkit-font-smoothing:antialiased}
@@ -236,3 +238,12 @@ tr.diverged{background:var(--red-bg)}
   .stats-row{grid-template-columns:1fr 1fr}
   .metric-row{grid-template-columns:1fr}
 }
+
+/* ── Stale banner (SSE disconnected / no recent data) ───────────────────── */
+#stale-banner{position:fixed;top:calc(var(--nav-height) + 8px);left:50%;transform:translateX(-50%);
+  z-index:200;background:var(--yellow-bg);color:var(--text);border:1px solid var(--yellow);
+  padding:8px 18px;border-radius:var(--r-md);font-size:13px;font-weight:500;
+  box-shadow:var(--shadow-md);display:flex;align-items:center;gap:10px}
+#stale-banner span{color:var(--text-sec)}
+html.is-stale .panel,html.is-stale .stat-card,html.is-stale .metric-card,html.is-stale .winner-banner{
+  opacity:.55;filter:grayscale(.4);transition:opacity .3s var(--ease),filter .3s var(--ease)}

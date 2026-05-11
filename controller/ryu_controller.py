@@ -50,7 +50,7 @@ from constants import (
     # Comparison mode
     ROUTING_MODE_DQN, ROUTING_MODE_BASELINE, BASELINE_POLICY_DEFAULT,
 )
-from agent.dqn_agent import DQNAgent, compute_reward
+from agent.dqn_agent import DQNAgent, compute_reward, compute_reward_components
 from collector.stats_collector import StatsCollector
 from constants import FEATURE_NAMES, RUNTIME_STATE_FILE, REPLAY_BUFFER_FILE
 from controller.baseline_router import (
@@ -173,6 +173,12 @@ class IoTController(app_manager.RyuApp):
         self.total_reward = 0.0
         self.dqn_total_reward = 0.0
         self.baseline_total_reward = 0.0
+
+        # Per-component cumulative rewards for DQN-vs-baseline breakdown
+        self.dqn_components      = {"latency": 0.0, "reliability": 0.0,
+                                    "throughput": 0.0, "fairness": 0.0}
+        self.baseline_components = {"latency": 0.0, "reliability": 0.0,
+                                    "throughput": 0.0, "fairness": 0.0}
 
         self.logger.info(
             "Routing mode=%s baseline=%s shadow_compare=%s",
@@ -315,23 +321,29 @@ class IoTController(app_manager.RyuApp):
 
             # ── Train on each active flow ──────────────────────────────────────
             for flow_key, entry in list(self.flow_table.items()):
-                reward = compute_reward(entry.state_seq[-1], entry.action, new_state)
+                comp = compute_reward_components(entry.state_seq[-1], entry.action, new_state)
+                reward = comp["total"]
                 if self.routing_mode == ROUTING_MODE_DQN:
                     self.agent.store(
                         entry.state_seq, entry.action, reward, next_state_seq, done=False
                     )
                     self.dqn_total_reward += reward
+                    self._accumulate_components(self.dqn_components, comp)
                 else:
                     self.baseline_total_reward += reward
+                    self._accumulate_components(self.baseline_components, comp)
                 # Update the entry's state_seq to slide the window forward
                 entry.state_seq = next_state_seq
 
             for flow_key, entry in list(self.shadow_flow_table.items()):
-                shadow_reward = compute_reward(entry.state_seq[-1], entry.action, new_state)
+                comp = compute_reward_components(entry.state_seq[-1], entry.action, new_state)
+                shadow_reward = comp["total"]
                 if self.routing_mode == ROUTING_MODE_DQN:
                     self.baseline_total_reward += shadow_reward
+                    self._accumulate_components(self.baseline_components, comp)
                 else:
                     self.dqn_total_reward += shadow_reward
+                    self._accumulate_components(self.dqn_components, comp)
                 entry.state_seq = next_state_seq
 
             loss = None
@@ -608,21 +620,27 @@ class IoTController(app_manager.RyuApp):
 
         # Final experience: mark done=True so agent discounts future correctly
         current_state_seq = list(self.state_buffer)
-        reward = compute_reward(entry.state_seq[-1], entry.action, self.prev_state)
+        comp = compute_reward_components(entry.state_seq[-1], entry.action, self.prev_state)
+        reward = comp["total"]
         if self.routing_mode == ROUTING_MODE_DQN:
             self.agent.store(entry.state_seq, entry.action, reward, current_state_seq, done=True)
             self.dqn_total_reward += reward
+            self._accumulate_components(self.dqn_components, comp)
         else:
             self.baseline_total_reward += reward
+            self._accumulate_components(self.baseline_components, comp)
 
         if shadow_entry is not None:
-            shadow_reward = compute_reward(
+            shadow_comp = compute_reward_components(
                 shadow_entry.state_seq[-1], shadow_entry.action, self.prev_state
             )
+            shadow_reward = shadow_comp["total"]
             if self.routing_mode == ROUTING_MODE_DQN:
                 self.baseline_total_reward += shadow_reward
+                self._accumulate_components(self.baseline_components, shadow_comp)
             else:
                 self.dqn_total_reward += shadow_reward
+                self._accumulate_components(self.dqn_components, shadow_comp)
 
         self.logger.debug("Flow removed %s→%s path=%s reward=%.3f",
                           src_ip, dst_ip, ACTION_NAMES[entry.action], reward)
@@ -647,6 +665,29 @@ class IoTController(app_manager.RyuApp):
             return None
         return ((compared - base) / abs(base)) * 100.0
 
+    @staticmethod
+    def _accumulate_components(target: dict, comp: dict) -> None:
+        """Add per-component reward values into a running cumulative dict."""
+        target["latency"]     += comp.get("latency",     0.0)
+        target["reliability"] += comp.get("reliability", 0.0)
+        target["throughput"]  += comp.get("throughput",  0.0)
+        target["fairness"]    += comp.get("fairness",    0.0)
+
+    def _component_breakdown(self) -> dict:
+        """Dict suitable for JSON: per-component DQN/baseline cumulative + delta."""
+        keys = ("latency", "reliability", "throughput", "fairness")
+        out  = {}
+        for k in keys:
+            d = float(self.dqn_components[k])
+            b = float(self.baseline_components[k])
+            out[k] = {
+                "dqn":      round(d, 3),
+                "baseline": round(b, 3),
+                "delta":    round(d - b, 3),
+                "winner":   "dqn" if d > b else "baseline" if b > d else "tie",
+            }
+        return out
+
     def _build_comparison_payload(self) -> dict:
         delta = self.dqn_total_reward - self.baseline_total_reward
         winner = "dqn" if delta > 0 else "baseline" if delta < 0 else "tie"
@@ -664,4 +705,5 @@ class IoTController(app_manager.RyuApp):
             "winner": winner,
             "dqn_path_counts": self._named_counts(self.dqn_path_counts),
             "baseline_path_counts": self._named_counts(self.baseline_path_counts),
+            "components": self._component_breakdown(),
         }
