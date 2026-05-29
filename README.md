@@ -63,7 +63,21 @@ sudo .venv/bin/python3 train.py --phase-secs 60 --routing-mode baseline --baseli
 | `--baseline-policy {shortest_path,ecmp_hash,round_robin,least_utilized,random}` | least_utilized | Baseline policy for baseline mode + shadow comparison |
 | `--no-shadow-compare` | off | Disable DQN-vs-baseline shadow metrics |
 
-### Check progress while running
+### Running on Mac (Actual Model Training)
+
+Since Mininet requires a Linux kernel, use the provided Docker simulation environment to perform actual model training on macOS. This environment runs a full virtual network with Ryu, OvS, and the DQN agent.
+
+```bash
+# Start the full simulation (Ryu + Mininet + DQN Training)
+docker compose -f docker-compose.sim.yml up --build
+```
+
+- **Dashboard:** http://localhost:8080
+- **REST API:** http://localhost:5000
+
+*Note: This requires Docker Desktop for Mac and runs in privileged mode to manage the virtual network.*
+
+### Running on Mac (Demo / Mock Mode)
 
 - Dashboard: http://localhost:8080
 - REST API: http://localhost:5000

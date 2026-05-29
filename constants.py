@@ -172,7 +172,7 @@ R_FAIRNESS     = 0.1
 R_PRIORITY_MUL = 5.0
 
 # ── API ───────────────────────────────────────────────────────────────────────
-API_HOST            = "127.0.0.1"
+API_HOST            = "0.0.0.0"
 API_PORT            = 5000
 API_BASE            = f"http://{API_HOST}:{API_PORT}"
 DASHBOARD_PORT      = 8080

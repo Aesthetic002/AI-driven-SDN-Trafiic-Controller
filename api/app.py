@@ -326,32 +326,36 @@ def _file_pump():
     """Reads RUNTIME_STATE_FILE written by Ryu and pushes into shared_state."""
     from constants import ACTION_PATH_A, ACTION_PATH_B, ACTION_PATH_C, ACTION_DROP
     last_mtime = 0
+    print(f"[api] File pump started, watching {RUNTIME_STATE_FILE}")
     while True:
         try:
-            mtime = os.path.getmtime(RUNTIME_STATE_FILE)
-            if mtime > last_mtime:
-                last_mtime = mtime
-                with open(RUNTIME_STATE_FILE) as f:
-                    d = json.load(f)
-                ss.push_state(d.get("state", [0.0]*20),
-                              d.get("feature_names", FEATURE_NAMES))
-                ss.push_agent(d.get("epsilon", 1.0), d.get("learn_steps", 0),
-                              d.get("total_reward", 0.0), d.get("last_loss"),
-                              episode_count=d.get("episode_count"))
-                pc = d.get("path_counts", {})
-                ss.push_path_counts({
-                    ACTION_PATH_A: pc.get("PATH_A", 0),
-                    ACTION_PATH_B: pc.get("PATH_B", 0),
-                    ACTION_PATH_C: pc.get("PATH_C", 0),
-                    ACTION_DROP:   pc.get("DROP",   0),
-                })
-                ss.push_util(d.get("avg_util", 0.0))
-                ss.push_comparison(d.get("comparison", {}))
-                ss.push_flow_decisions(d.get("flow_decisions", []))
-                with ss._lock:
-                    ss._state["active_flows"] = d.get("active_flows", {})
-        except (OSError, json.JSONDecodeError, KeyError):
-            pass
+            if os.path.exists(RUNTIME_STATE_FILE):
+                mtime = os.path.getmtime(RUNTIME_STATE_FILE)
+                if mtime > last_mtime:
+                    last_mtime = mtime
+                    with open(RUNTIME_STATE_FILE) as f:
+                        d = json.load(f)
+                    ss.push_state(d.get("state", [0.0]*20),
+                                  d.get("feature_names", FEATURE_NAMES))
+                    ss.push_agent(d.get("epsilon", 1.0), d.get("learn_steps", 0),
+                                  d.get("total_reward", 0.0), d.get("last_loss"),
+                                  episode_count=d.get("episode_count"))
+                    pc = d.get("path_counts", {})
+                    ss.push_path_counts({
+                        ACTION_PATH_A: pc.get("PATH_A", 0),
+                        ACTION_PATH_B: pc.get("PATH_B", 0),
+                        ACTION_PATH_C: pc.get("PATH_C", 0),
+                        ACTION_DROP:   pc.get("DROP",   0),
+                    })
+                    ss.push_util(d.get("avg_util", 0.0))
+                    ss.push_comparison(d.get("comparison", {}))
+                    ss.push_flow_decisions(d.get("flow_decisions", []))
+                    with ss._lock:
+                        ss._state["active_flows"] = d.get("active_flows", {})
+                    # Noisy but helpful for debugging stuck UI
+                    print(f"[api] Read state update, steps={d.get('learn_steps', 0)}")
+        except (OSError, json.JSONDecodeError, KeyError) as e:
+            print(f"[api] File pump error: {e}")
         time.sleep(1)
 
 

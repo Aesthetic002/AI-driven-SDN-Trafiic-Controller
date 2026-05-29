@@ -183,7 +183,10 @@ def start_mininet(phase_secs: int):
 
     print("[train] Starting Mininet topology...")
     net = build_net(use_remote_controller=True)
+    print("[train] Calling net.start()...")
     net.start()
+    print("[train] Installing static ARP entries...")
+    net.staticArp()
     print("[train] Mininet up — waiting 2s for switch registration...")
     time.sleep(2)
 
@@ -281,7 +284,7 @@ def main():
         target=_stream_output, args=(ryu_proc, "ryu"), daemon=True
     ).start()
 
-    if not _wait_for_port(CONTROLLER_HOST, CONTROLLER_PORT, "Ryu"):
+    if not _wait_for_port("127.0.0.1", CONTROLLER_PORT, "Ryu"):
         print("[train] ERROR: Ryu did not start. Check controller/ryu_controller.py")
         cleanup()
         return
@@ -296,7 +299,9 @@ def main():
         print(f"[train] Open dashboard → http://localhost:{DASHBOARD_PORT}")
 
     print()
-    print("[train] All services up. Starting Mininet + traffic...")
+    print("[train] All services up. Waiting 5s for Ryu to settle before Mininet...")
+    time.sleep(5)
+    print("[train] Starting Mininet + traffic...")
     print("[train] Press Ctrl-C to stop early.")
     print()
 

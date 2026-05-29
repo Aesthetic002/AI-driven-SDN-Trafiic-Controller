@@ -109,7 +109,8 @@ class ScenarioRunner:
     def run(self):
         print("\n=== Scenario Runner starting ===", flush=True)
         self._start_servers()
-        time.sleep(1)   # let servers bind
+        print("[runner] Waiting 2s for servers to bind...", flush=True)
+        time.sleep(2)
 
         try:
             for phase in sorted(PHASE_SPECS):

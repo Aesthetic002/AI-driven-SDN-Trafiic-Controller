@@ -47,7 +47,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mininet.net import Mininet
 from mininet.node import OVSSwitch, RemoteController, OVSController
-from mininet.link import TCLink
+from mininet.link import Link
+
+# Use standard Link on Mac to avoid 'tc' kernel module hangs
+TCLink = Link
 from mininet.topo import Topo
 from mininet.cli import CLI
 from mininet.log import setLogLevel, info
@@ -191,8 +194,10 @@ def build_net(use_remote_controller: bool = True) -> Mininet:
     if use_remote_controller:
         fail_mode = "secure"
         stp = False
+        # Use 127.0.0.1 explicitly for the remote controller
+        c_ip = "127.0.0.1"
         controller = lambda name: RemoteController(
-            name, ip=CONTROLLER_HOST, port=CONTROLLER_PORT
+            name, ip=c_ip, port=CONTROLLER_PORT
         )
     else:
         # standalone = OVS built-in learning switch; STP needed for cross-link loop
@@ -202,12 +207,15 @@ def build_net(use_remote_controller: bool = True) -> Mininet:
 
     topo = IoTTopo(fail_mode=fail_mode, stp=stp)
 
+    # Force standard Link on Mac/OrbStack to avoid traffic control hangs
+    link_cls = Link
+
     net = Mininet(
         topo=topo,
         controller=controller,
-        link=TCLink,
+        link=link_cls,
         autoSetMacs=True,
-        autoStaticArp=True,
+        autoStaticArp=False,  # Can sometimes hang on Mac
     )
     return net
 

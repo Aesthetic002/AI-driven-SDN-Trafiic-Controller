@@ -154,14 +154,14 @@ class IoTController(app_manager.RyuApp):
 
         # DQN agent
         self.agent = DQNAgent()
-        if os.path.exists(WEIGHTS_PATH):
+        if os.path.exists(WEIGHTS_PATH) and os.path.getsize(WEIGHTS_PATH) > 0:
             self.agent.load(WEIGHTS_PATH)
             self.logger.info("Loaded weights from %s", WEIGHTS_PATH)
         # Increment episode counter for this new run and persist immediately
         self.agent.episode_count += 1
         self.agent.save(WEIGHTS_PATH)
         self.logger.info("Episode %d started", self.agent.episode_count)
-        if os.path.exists(REPLAY_BUFFER_FILE):
+        if os.path.exists(REPLAY_BUFFER_FILE) and os.path.getsize(REPLAY_BUFFER_FILE) > 0:
             n = self.agent.load_buffer(REPLAY_BUFFER_FILE)
             self.logger.info("Loaded replay buffer: %d experiences", n)
 
@@ -210,8 +210,13 @@ class IoTController(app_manager.RyuApp):
         pkt      = packet.Packet(msg.data)
 
         eth = pkt.get_protocol(ethernet.ethernet)
-        if eth is None or eth.ethertype != ether_types.ETH_TYPE_IP:
-            return          # ignore non-IP (ARP handled by flood below)
+        if eth is None:
+            return
+        if eth.ethertype == ether_types.ETH_TYPE_LLDP:
+            return
+        if eth.ethertype != ether_types.ETH_TYPE_IP:
+            self._flood(dp, msg, in_port)
+            return
 
         ip_pkt = pkt.get_protocol(ipv4.ipv4)
         if ip_pkt is None:
@@ -386,6 +391,8 @@ class IoTController(app_manager.RyuApp):
 
             # ── Write metrics to file for cross-process Flask API ─────────────
             self._write_state_file(new_state, loss, avg_util, comparison_payload)
+            if self.learn_steps % 5 == 0:
+                self.logger.info("Wrote state file: steps=%d, reward=%.2f", self.learn_steps, self.total_reward)
 
             self.prev_state = new_state
             hub.sleep(STATS_INTERVAL)

@@ -3,7 +3,7 @@
    Navigation, Theme, SSE, Utilities, KPI Computations
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const API = 'http://127.0.0.1:5000';
+const API = `${window.location.protocol}//${window.location.hostname}:5000`;
 let _dataCallback   = null;
 let _es             = null;
 let _lastDataTime   = 0;       // wall-clock ms of the last SSE message
