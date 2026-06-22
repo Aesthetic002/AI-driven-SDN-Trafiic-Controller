@@ -32,7 +32,8 @@ from constants import (
     EPS_START, EPS_END, EPS_DECAY,
     TARGET_SYNC, GRAD_CLIP_NORM,
     R_LATENCY, R_RELIABILITY, R_THROUGHPUT, R_FAIRNESS, R_PRIORITY_MUL,
-    ACTION_PATH_A, ACTION_PATH_B, ACTION_PATH_C, ACTION_DROP,
+    ACTION_PATH_A, ACTION_PATH_B, ACTION_PATH_C,
+    ACTION_PATH_D, ACTION_PATH_E, ACTION_DROP,
     ACTION_NAMES,
 )
 
@@ -139,6 +140,8 @@ def compute_reward_components(state: list[float], action: int,
     bytes_path_b = next_state[15]
     priority_flag    = next_state[18]
     congestion_flag  = next_state[19]
+    util_s3_s7   = next_state[22] if len(next_state) > 22 else 0.0
+    util_s4_s7   = next_state[23] if len(next_state) > 23 else 0.0
 
     zero = {"total": 0.0, "latency": 0.0, "reliability": 0.0,
             "throughput": 0.0, "fairness": 0.0}
@@ -148,21 +151,34 @@ def compute_reward_components(state: list[float], action: int,
         return zero
 
     if action == ACTION_PATH_A:
-        latency_r    = 1.0 - util_s3_s5
+        latency_r     = 1.0 - util_s3_s5
         reliability_r = 1.0 - loss_path_a
         throughput_r  = bytes_path_a
+        fairness_r    = 1.0 - abs(util_s3_s5 - util_s4_s5)
     elif action == ACTION_PATH_B:
-        latency_r    = 1.0 - util_s4_s5
+        latency_r     = 1.0 - util_s4_s5
         reliability_r = 1.0 - loss_path_b
         throughput_r  = bytes_path_b
+        fairness_r    = 1.0 - abs(util_s3_s5 - util_s4_s5)
     elif action == ACTION_PATH_C:
-        latency_r    = 0.5 * (1.0 - util_s3_s5) + 0.5 * (1.0 - util_s4_s5) - 0.1
+        latency_r     = 0.5 * (1.0 - util_s3_s5) + 0.5 * (1.0 - util_s4_s5) - 0.1
         reliability_r = 0.5 * (1.0 - loss_path_a) + 0.5 * (1.0 - loss_path_b)
         throughput_r  = 0.5 * (bytes_path_a + bytes_path_b)
+        fairness_r    = 1.0 - abs(util_s3_s5 - util_s4_s5)
+    elif action == ACTION_PATH_D:
+        # Via S3 → S7: uses secondary aggregation, slightly higher latency than A
+        latency_r     = 1.0 - util_s3_s7 - 0.05   # 5% penalty vs primary
+        reliability_r = 1.0 - loss_path_a
+        throughput_r  = bytes_path_a * 0.9          # 75Mbps cap vs 50Mbps but normalized
+        fairness_r    = 1.0 - abs(util_s3_s7 - util_s4_s7)
+    elif action == ACTION_PATH_E:
+        # Via S4 → S7: secondary high-BW path
+        latency_r     = 1.0 - util_s4_s7 - 0.05
+        reliability_r = 1.0 - loss_path_b
+        throughput_r  = bytes_path_b * 0.95         # 80Mbps cap
+        fairness_r    = 1.0 - abs(util_s3_s7 - util_s4_s7)
     else:
         return zero
-
-    fairness_r = 1.0 - abs(util_s3_s5 - util_s4_s5)
     mul = R_PRIORITY_MUL if priority_flag else 1.0
 
     lat_w   = R_LATENCY     * latency_r     * mul

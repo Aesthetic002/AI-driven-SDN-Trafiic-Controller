@@ -12,7 +12,7 @@ CONTROLLER_PORT = 6633
 # s3     = core switch, low-latency path
 # s4     = core switch, high-bandwidth path
 # s5     = aggregation / server switch
-SWITCHES = ["s1", "s2", "s3", "s4", "s5"]
+SWITCHES = ["s1", "s2", "s3", "s4", "s5", "s6", "s7"]
 
 # ── Port assignments ──────────────────────────────────────────────────────────
 # Mininet assigns ports in link-creation order (see iot_topology.py).
@@ -46,22 +46,46 @@ S4_PORT_FROM_S2   = 2
 S4_PORT_TO_S5     = 3   # → s5 (100 Mbps, 5ms)
 S4_PORT_CROSSLINK = 4   # ↔ s3
 
+# S3 (Core, low-latency) — extended
+S3_PORT_FROM_S6   = 5   # ← s6 (Cluster C)
+S3_PORT_TO_S7     = 6   # → s7 (secondary aggregation)
+
+# S4 (Core, high-BW) — extended
+S4_PORT_FROM_S6   = 5   # ← s6 (Cluster C)
+S4_PORT_TO_S7     = 6   # → s7 (secondary aggregation)
+
 # S5 (Aggregation / server switch)
 S5_PORT_FROM_S3   = 1
 S5_PORT_FROM_S4   = 2
 S5_PORT_SERVER1   = 3
 S5_PORT_SERVER2   = 4
 
+# S6 (Cluster C access switch)
+S6_PORT_SENSOR5   = 1   # h_sensor5
+S6_PORT_SENSOR6   = 2   # h_sensor6
+S6_PORT_CAMERA3   = 3   # h_camera3
+S6_PORT_GATEWAY   = 4   # h_gateway
+S6_PORT_CORE_A    = 5   # → s3
+S6_PORT_CORE_B    = 6   # → s4
+
+# S7 (Secondary aggregation switch)
+S7_PORT_FROM_S3   = 1   # ← s3
+S7_PORT_FROM_S4   = 2   # ← s4
+S7_PORT_SERVER3   = 3   # → h_server3
+S7_PORT_SERVER4   = 4   # → h_server4
+
 # ── Link capacities (Mbps) ────────────────────────────────────────────────────
-LINK_BW_SENSOR       = 1
-LINK_BW_CAMERA       = 10
-LINK_BW_ACTUATOR     = 2
-LINK_BW_EMERGENCY    = 2
-LINK_BW_ACCESS_CORE  = 20    # S1/S2 → S3/S4
-LINK_BW_CORE_SERVER_A = 50   # S3 → S5
-LINK_BW_CORE_SERVER_B = 100  # S4 → S5 (higher BW)
-LINK_BW_CROSSLINK    = 50    # S3 ↔ S4
-LINK_BW_SERVER       = 1000  # S5 → servers
+LINK_BW_SENSOR        = 1
+LINK_BW_CAMERA        = 10
+LINK_BW_ACTUATOR      = 2
+LINK_BW_EMERGENCY     = 2
+LINK_BW_ACCESS_CORE   = 20    # S1/S2/S6 → S3/S4
+LINK_BW_CORE_SERVER_A = 50    # S3 → S5
+LINK_BW_CORE_SERVER_B = 100   # S4 → S5 (higher BW)
+LINK_BW_CORE_SERVER_C = 75    # S3 → S7 (secondary aggregation)
+LINK_BW_CORE_SERVER_D = 80    # S4 → S7 (secondary high-BW)
+LINK_BW_CROSSLINK     = 50    # S3 ↔ S4
+LINK_BW_SERVER        = 1000  # S5/S7 → servers
 
 # ── Link delays ───────────────────────────────────────────────────────────────
 LINK_DELAY_SENSOR       = "2ms"
@@ -72,8 +96,12 @@ LINK_DELAY_S1_S3        = "5ms"    # Cluster A → core low-latency
 LINK_DELAY_S1_S4        = "8ms"    # Cluster A → core high-BW
 LINK_DELAY_S2_S3        = "6ms"    # Cluster B → core low-latency
 LINK_DELAY_S2_S4        = "7ms"    # Cluster B → core high-BW
-LINK_DELAY_S3_S5        = "2ms"    # Core A → server
-LINK_DELAY_S4_S5        = "5ms"    # Core B → server
+LINK_DELAY_S6_S3        = "5ms"    # Cluster C → core low-latency
+LINK_DELAY_S6_S4        = "8ms"    # Cluster C → core high-BW
+LINK_DELAY_S3_S5        = "2ms"    # Core A → server (primary)
+LINK_DELAY_S4_S5        = "5ms"    # Core B → server (primary)
+LINK_DELAY_S3_S7        = "4ms"    # Core A → server (secondary)
+LINK_DELAY_S4_S7        = "6ms"    # Core B → server (secondary)
 LINK_DELAY_CROSSLINK    = "3ms"    # S3 ↔ S4
 LINK_DELAY_SERVER       = "1ms"
 
@@ -88,15 +116,24 @@ IP_SENSOR3    = "10.0.0.5"
 IP_SENSOR4    = "10.0.0.6"
 IP_CAMERA2    = "10.0.0.7"
 IP_ACTUATOR   = "10.0.0.8"
-# Servers (→ s5)
+# Servers (→ s5, primary aggregation)
 IP_SERVER1    = "10.0.0.9"
 IP_SERVER2    = "10.0.0.10"
+# Cluster C (→ s6)
+IP_SENSOR5    = "10.0.0.11"
+IP_SENSOR6    = "10.0.0.12"
+IP_CAMERA3    = "10.0.0.13"
+IP_GATEWAY    = "10.0.0.14"
+# Servers (→ s7, secondary aggregation)
+IP_SERVER3    = "10.0.0.15"
+IP_SERVER4    = "10.0.0.16"
 
 # Cluster IP ranges (for flow classification)
 CLUSTER_A_IPS = {IP_SENSOR1, IP_SENSOR2, IP_CAMERA1, IP_EMERG}
 CLUSTER_B_IPS = {IP_SENSOR3, IP_SENSOR4, IP_CAMERA2, IP_ACTUATOR}
+CLUSTER_C_IPS = {IP_SENSOR5, IP_SENSOR6, IP_CAMERA3, IP_GATEWAY}
 EMERGENCY_IPS = {IP_EMERG}
-ACTUATOR_IPS  = {IP_ACTUATOR}
+ACTUATOR_IPS  = {IP_ACTUATOR, IP_GATEWAY}
 
 # ── Traffic classification ────────────────────────────────────────────────────
 SENSOR_PORT   = 5005   # UDP — low-bandwidth periodic readings
@@ -110,15 +147,19 @@ DSCP_VIDEO     = 26    # AF31 — video stream
 DSCP_ELEPHANT  = 0     # BE  — bulk transfer
 
 # ── DQN actions ───────────────────────────────────────────────────────────────
-ACTION_PATH_A  = 0   # Via s3 → s5 (low latency, 7ms end-to-end)
-ACTION_PATH_B  = 1   # Via s4 → s5 (high BW, 13ms end-to-end)
-ACTION_PATH_C  = 2   # Via s3 → s4 → s5 (cross-link overflow, 13ms + 3ms)
-ACTION_DROP    = 3
-NUM_ACTIONS    = 4
+ACTION_PATH_A  = 0   # Via s3 → s5 (low latency, 7ms,  50Mbps)
+ACTION_PATH_B  = 1   # Via s4 → s5 (high BW,  13ms, 100Mbps)
+ACTION_PATH_C  = 2   # Via s3 → s4 → s5 (cross-link overflow)
+ACTION_PATH_D  = 3   # Via s3 → s7 (secondary aggregation, 10ms, 75Mbps)
+ACTION_PATH_E  = 4   # Via s4 → s7 (secondary high-BW,    15ms, 80Mbps)
+ACTION_DROP    = 5
+NUM_ACTIONS    = 6
 ACTION_NAMES   = {
-    ACTION_PATH_A: "PathA(s3,low-lat)",
-    ACTION_PATH_B: "PathB(s4,high-BW)",
-    ACTION_PATH_C: "PathC(cross-link)",
+    ACTION_PATH_A: "PathA(s3→s5)",
+    ACTION_PATH_B: "PathB(s4→s5)",
+    ACTION_PATH_C: "PathC(cross)",
+    ACTION_PATH_D: "PathD(s3→s7)",
+    ACTION_PATH_E: "PathE(s4→s7)",
     ACTION_DROP:   "Drop",
 }
 
@@ -126,29 +167,35 @@ ACTION_NAMES   = {
 # Contract between stats_collector.py (M1) and dqn_agent.py (M2).
 # Do NOT reorder without updating both files.
 STATE_FEATURES = [
-    # idx  name                       source              normalization
-    (0,  "link_util_s1_s3",          "S1 port 5 stats",  "Mbps / 20.0"),
-    (1,  "link_util_s1_s4",          "S1 port 6 stats",  "Mbps / 20.0"),
-    (2,  "link_util_s2_s3",          "S2 port 5 stats",  "Mbps / 20.0"),
-    (3,  "link_util_s2_s4",          "S2 port 6 stats",  "Mbps / 20.0"),
-    (4,  "link_util_s3_s5",          "S3 port 3 stats",  "Mbps / 50.0"),
-    (5,  "link_util_s4_s5",          "S4 port 3 stats",  "Mbps / 100.0"),
-    (6,  "link_util_crosslink",      "S3 port 4 stats",  "Mbps / 50.0"),
-    (7,  "active_flows_path_a",      "flow table s3",    "count / 20.0"),
-    (8,  "active_flows_path_b",      "flow table s4",    "count / 20.0"),
-    (9,  "active_flows_path_c",      "flow table s3+s4", "count / 20.0"),
-    (10, "packet_loss_path_a",       "TX vs RX s3",      "[0,1]"),
-    (11, "packet_loss_path_b",       "TX vs RX s4",      "[0,1]"),
-    (12, "jitter_path_a",            "util variance",    "ms / 50.0"),
-    (13, "jitter_path_b",            "util variance",    "ms / 50.0"),
-    (14, "bytes_path_a",             "flow counters s3", "bytes / 1e7"),
-    (15, "bytes_path_b",             "flow counters s4", "bytes / 1e7"),
-    (16, "time_of_day",              "system clock",     "sec / 86400"),
-    (17, "util_trend",               "delta avg util",   "[-1, 1]"),
-    (18, "priority_flag",            "DSCP field",       "1=high-prio active"),
-    (19, "congestion_flag",          "derived",          "1=any link >80%"),
+    # idx  name                       source                normalization
+    (0,  "link_util_s1_s3",          "S1 port 5 stats",    "Mbps / 20.0"),
+    (1,  "link_util_s1_s4",          "S1 port 6 stats",    "Mbps / 20.0"),
+    (2,  "link_util_s2_s3",          "S2 port 5 stats",    "Mbps / 20.0"),
+    (3,  "link_util_s2_s4",          "S2 port 6 stats",    "Mbps / 20.0"),
+    (4,  "link_util_s3_s5",          "S3 port 3 stats",    "Mbps / 50.0"),
+    (5,  "link_util_s4_s5",          "S4 port 3 stats",    "Mbps / 100.0"),
+    (6,  "link_util_crosslink",      "S3 port 4 stats",    "Mbps / 50.0"),
+    (7,  "active_flows_path_a",      "flow table s3",      "count / 20.0"),
+    (8,  "active_flows_path_b",      "flow table s4",      "count / 20.0"),
+    (9,  "active_flows_path_c",      "flow table s3+s4",   "count / 20.0"),
+    (10, "packet_loss_path_a",       "TX vs RX s3→s5",     "[0,1]"),
+    (11, "packet_loss_path_b",       "TX vs RX s4→s5",     "[0,1]"),
+    (12, "jitter_path_a",            "util variance A",    "ms / 50.0"),
+    (13, "jitter_path_b",            "util variance B",    "ms / 50.0"),
+    (14, "bytes_path_a",             "flow counters s3",   "bytes / 1e7"),
+    (15, "bytes_path_b",             "flow counters s4",   "bytes / 1e7"),
+    (16, "time_of_day",              "system clock",       "sec / 86400"),
+    (17, "util_trend",               "delta avg util",     "[-1, 1]"),
+    (18, "priority_flag",            "DSCP field",         "1=high-prio active"),
+    (19, "congestion_flag",          "derived",            "1=any link >80%"),
+    (20, "link_util_s6_s3",          "S6 port 5 stats",    "Mbps / 20.0"),
+    (21, "link_util_s6_s4",          "S6 port 6 stats",    "Mbps / 20.0"),
+    (22, "link_util_s3_s7",          "S3 port 6 stats",    "Mbps / 75.0"),
+    (23, "link_util_s4_s7",          "S4 port 6 stats",    "Mbps / 80.0"),
+    (24, "active_flows_path_d",      "flow table s3→s7",   "count / 20.0"),
+    (25, "active_flows_path_e",      "flow table s4→s7",   "count / 20.0"),
 ]
-STATE_DIM     = len(STATE_FEATURES)   # 20
+STATE_DIM     = len(STATE_FEATURES)   # 26
 FEATURE_NAMES = [f[1] for f in STATE_FEATURES]
 
 # ── Training hyperparameters ──────────────────────────────────────────────────

@@ -197,9 +197,10 @@ initPage('comparison', function(d) {
     el.className = 'metric-delta '+(avg<.02?'delta-pos':avg<.1?'delta-neutral':'delta-neg');
   }
 
-  // KPI 3: Jain's Fairness
+  // KPI 3: Jain's Fairness — use all available link-util features
   if (st.length>=7) {
-    const jfi = jainFairnessIndex(st.slice(0,7));
+    const linkUtils = [...st.slice(0,7), ...(st.length>=24 ? st.slice(20,24) : [])];
+    const jfi = jainFairnessIndex(linkUtils);
     setTxt('kpi-jfi', jfi!=null?fmt(jfi,3):'—');
     const jEl = document.getElementById('kpi-jfi-status');
     if (jfi!=null) { jEl.textContent = jfi>.9?'Excellent':jfi>.75?'Good':jfi>.5?'Fair':'Poor';
@@ -384,12 +385,13 @@ function drawDelta(h) {
 }
 
 function drawPathBars(dC,bC) {
-  const svg=clearSvg('#path-bar-svg'), dims=chartDimensions(svg,{t:12,b:50}), {W,H,M}=dims;
-  const cats=['PATH_A','PATH_B','PATH_C','DROP'],labels=['Path A\n(S3)','Path B\n(S4)','Path C\n(cross)','Drop'];
-  const cols=['var(--pathA)','var(--pathB)','var(--pathC)','var(--drop)'];
+  const svg=clearSvg('#path-bar-svg'), dims=chartDimensions(svg,{t:12,b:52}), {W,H,M}=dims;
+  const cats  =['PATH_A','PATH_B','PATH_C','PATH_D','PATH_E','DROP'];
+  const labels=['Path A\n(S3→S5)','Path B\n(S4→S5)','Path C\n(cross)','Path D\n(S3→S7)','Path E\n(S4→S7)','Drop'];
+  const cols  =['#3b82f6','#8b5cf6','#f97316','#06b6d4','#ec4899','var(--drop)'];
   const maxV=Math.max(...cats.map(c=>Math.max(dC[c]||0,bC[c]||0)),1);
-  const x0=d3.scaleBand().domain(cats).range([M.l,W-M.r]).padding(.25);
-  const x1=d3.scaleBand().domain(['d','b']).range([0,x0.bandwidth()]).padding(.08);
+  const x0=d3.scaleBand().domain(cats).range([M.l,W-M.r]).padding(.22);
+  const x1=d3.scaleBand().domain(['d','b']).range([0,x0.bandwidth()]).padding(.06);
   const y=d3.scaleLinear().domain([0,maxV*1.2]).nice().range([H-M.b,M.t]);
   drawGridLines(svg,y,dims);
   svg.append('g').attr('class','axis').attr('transform',`translate(${M.l},0)`).call(d3.axisLeft(y).ticks(5).tickFormat(d3.format('d')));
@@ -399,8 +401,8 @@ function drawPathBars(dC,bC) {
     if(H-M.b-y(bv)>0){svg.append('rect').attr('x',gx+x1('b')).attr('y',y(bv)).attr('width',x1.bandwidth()).attr('height',H-M.b-y(bv)).attr('fill',col).attr('opacity',.2).attr('stroke',col).attr('stroke-width',1.5).attr('rx',3);
       if(bv>0)svg.append('text').attr('x',gx+x1('b')+x1.bandwidth()/2).attr('y',y(bv)-4).attr('text-anchor','middle').attr('font-size',10).attr('fill',col).attr('opacity',.5).text(bv);}
     const cx=gx+x0.bandwidth()/2,pts=labels[i].split('\n');
-    svg.append('text').attr('x',cx).attr('y',H-M.b+16).attr('text-anchor','middle').attr('font-size',11).attr('fill',col).text(pts[0]);
-    if(pts[1])svg.append('text').attr('x',cx).attr('y',H-M.b+30).attr('text-anchor','middle').attr('font-size',9).attr('fill',col).attr('opacity',.6).text(pts[1]);
+    svg.append('text').attr('x',cx).attr('y',H-M.b+16).attr('text-anchor','middle').attr('font-size',10).attr('fill',col).text(pts[0]);
+    if(pts[1])svg.append('text').attr('x',cx).attr('y',H-M.b+30).attr('text-anchor','middle').attr('font-size',8.5).attr('fill',col).attr('opacity',.6).text(pts[1]);
   });
 }
 

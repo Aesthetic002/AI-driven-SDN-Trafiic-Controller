@@ -4,8 +4,8 @@ Phase 6 — Scenario Runner
 Orchestrates 4 training phases over a Mininet network, launching and
 tearing down traffic generators on host namespaces.
 
-  Phase 1 (0–60s)   : Sensors only        — baseline, low BW
-  Phase 2 (60–120s) : +Camera streams     — BW surge on S3/S4 uplinks
+  Phase 1 (0–60s)   : Sensors only        — all 3 clusters, baseline low BW
+  Phase 2 (60–120s) : +Camera streams     — BW surge on S3/S4/S6 uplinks
   Phase 3 (120–180s): +Elephant + Emergency — congestion + priority stress
   Phase 4 (180–240s): Recovery            — elephant gone, sensors + occasional video
 
@@ -28,7 +28,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from constants import (
     IP_SENSOR1, IP_SENSOR2, IP_CAMERA1, IP_EMERG,
     IP_SENSOR3, IP_SENSOR4, IP_CAMERA2, IP_ACTUATOR,
-    IP_SERVER1, IP_SERVER2,
+    IP_SENSOR5, IP_SENSOR6, IP_CAMERA3, IP_GATEWAY,
+    IP_SERVER1, IP_SERVER2, IP_SERVER3, IP_SERVER4,
     SENSOR_PORT, VIDEO_PORT, ELEPHANT_PORT, ACTUATOR_PORT,
 )
 
@@ -48,34 +49,42 @@ class TrafficSpec:
 
 # Specs run in each phase (cumulative)
 PHASE_SPECS = {
-    # ── Phase 1: sensors baseline ─────────────────────────────────────────────
+    # ── Phase 1: sensors baseline — all 3 clusters ────────────────────────────
     1: [
         TrafficSpec("h_sensor1", "sensor",  IP_SERVER1, ["--duration", "240"]),
         TrafficSpec("h_sensor2", "sensor",  IP_SERVER1, ["--duration", "240"]),
         TrafficSpec("h_sensor3", "sensor",  IP_SERVER2, ["--duration", "240"]),
         TrafficSpec("h_sensor4", "sensor",  IP_SERVER2, ["--duration", "240"]),
+        TrafficSpec("h_sensor5", "sensor",  IP_SERVER3, ["--duration", "240"]),
+        TrafficSpec("h_sensor6", "sensor",  IP_SERVER3, ["--duration", "240"]),
     ],
-    # ── Phase 2: camera streams ───────────────────────────────────────────────
+    # ── Phase 2: camera streams from all clusters ─────────────────────────────
     2: [
         TrafficSpec("h_camera1", "video",   IP_SERVER1,
                     ["--mbps", "5", "--duration", "180"]),
         TrafficSpec("h_camera2", "video",   IP_SERVER2,
                     ["--mbps", "5", "--duration", "180"]),
+        TrafficSpec("h_camera3", "video",   IP_SERVER4,
+                    ["--mbps", "5", "--duration", "180"]),
     ],
-    # ── Phase 3: elephant flows + emergency ───────────────────────────────────
+    # ── Phase 3: elephant flows + emergency + gateway actuation ──────────────
     3: [
-        TrafficSpec("h_camera1",  "elephant", IP_SERVER1, ["--mb", "150"]),
+        TrafficSpec("h_camera1",  "elephant",  IP_SERVER1, ["--mb", "150"]),
+        TrafficSpec("h_camera3",  "elephant",  IP_SERVER4, ["--mb", "100"]),
         TrafficSpec("h_emerg",    "emergency", IP_SERVER1, ["--duration", "60"]),
         TrafficSpec("h_actuator", "actuator",  IP_SERVER2, ["--duration", "60"]),
+        TrafficSpec("h_gateway",  "actuator",  IP_SERVER3, ["--duration", "60"]),
     ],
-    # ── Phase 4: recovery (light video only) ──────────────────────────────────
+    # ── Phase 4: recovery — light video on all clusters ───────────────────────
     4: [
         TrafficSpec("h_camera1", "video", IP_SERVER1,
+                    ["--mbps", "2", "--duration", "60"]),
+        TrafficSpec("h_camera3", "video", IP_SERVER4,
                     ["--mbps", "2", "--duration", "60"]),
     ],
 }
 
-# Servers needed on h_server1 and h_server2
+# Servers needed on h_server1 through h_server4
 SERVER_SPECS = [
     (IP_SERVER1, "h_server1", "server-udp",  SENSOR_PORT),
     (IP_SERVER1, "h_server1", "server-udp",  VIDEO_PORT),
@@ -85,6 +94,15 @@ SERVER_SPECS = [
     (IP_SERVER2, "h_server2", "server-udp",  VIDEO_PORT),
     (IP_SERVER2, "h_server2", "server-tcp",  ELEPHANT_PORT),
     (IP_SERVER2, "h_server2", "server-udp",  ACTUATOR_PORT),
+    # Secondary aggregation servers (→ S7, Cluster C traffic)
+    (IP_SERVER3, "h_server3", "server-udp",  SENSOR_PORT),
+    (IP_SERVER3, "h_server3", "server-udp",  VIDEO_PORT),
+    (IP_SERVER3, "h_server3", "server-tcp",  ELEPHANT_PORT),
+    (IP_SERVER3, "h_server3", "server-udp",  ACTUATOR_PORT),
+    (IP_SERVER4, "h_server4", "server-udp",  SENSOR_PORT),
+    (IP_SERVER4, "h_server4", "server-udp",  VIDEO_PORT),
+    (IP_SERVER4, "h_server4", "server-tcp",  ELEPHANT_PORT),
+    (IP_SERVER4, "h_server4", "server-udp",  ACTUATOR_PORT),
 ]
 
 

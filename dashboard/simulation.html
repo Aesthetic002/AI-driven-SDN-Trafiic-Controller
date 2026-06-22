@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="color-scheme" content="dark light">
+  <script>(function(){var t=localStorage.getItem('sdn-theme')||'light';document.documentElement.setAttribute('data-theme',t);document.documentElement.style.background=t==='dark'?'#0f172a':'#f8fafc';})();</script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simulation Lab — AI-SDN Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
+</head>
+<body>
+<nav id="main-nav"></nav>
+
+<main class="page sim-page">
+
+  <!-- ── Hero ─────────────────────────────────────────────────────────── -->
+  <div class="sim-hero fade-in">
+    <div>
+      <h1 class="page-title">Simulation Lab</h1>
+      <p class="page-subtitle">Pick a topology and a scenario, then watch the AI route live traffic — every packet you see is the routing decision the data is made of.</p>
+    </div>
+    <div class="sim-hero-badge" id="hero-status">
+      <span class="hs-dot"></span><span id="hs-text">Ready</span>
+    </div>
+  </div>
+
+  <!-- ── Step 1: Topology ─────────────────────────────────────────────── -->
+  <div class="sim-section fade-in fade-in-1">
+    <div class="sim-step-label"><span class="sim-step-num">1</span> Choose a topology</div>
+    <div class="topo-cards" id="topo-cards"></div>
+  </div>
+
+  <!-- ── Step 2: Scenario ─────────────────────────────────────────────── -->
+  <div class="sim-section fade-in fade-in-2">
+    <div class="sim-step-label"><span class="sim-step-num">2</span> Choose a scenario</div>
+    <div class="scenario-cards" id="scenario-cards"></div>
+  </div>
+
+  <!-- ── Control bar ──────────────────────────────────────────────────── -->
+  <div class="sim-controlbar fade-in fade-in-3">
+    <div class="ctl-group">
+      <span class="ctl-label">View</span>
+      <div class="seg" id="mode-seg">
+        <button data-mode="dqn" class="seg-btn active">DQN</button>
+        <button data-mode="baseline" class="seg-btn">Baseline</button>
+        <button data-mode="compare" class="seg-btn">Compare</button>
+      </div>
+    </div>
+    <div class="ctl-group">
+      <span class="ctl-label">DQN engine</span>
+      <div class="seg" id="src-seg">
+        <button data-src="emulated" class="seg-btn active">Emulated</button>
+        <button data-src="real" class="seg-btn">Real model</button>
+      </div>
+    </div>
+    <div class="ctl-group">
+      <span class="ctl-label">Baseline policy</span>
+      <select id="baseline-select" class="ctl-select"></select>
+    </div>
+    <div class="ctl-group">
+      <span class="ctl-label">Speed</span>
+      <div class="seg" id="speed-seg">
+        <button data-speed="1800" class="seg-btn">0.5×</button>
+        <button data-speed="1100" class="seg-btn active">1×</button>
+        <button data-speed="650" class="seg-btn">2×</button>
+        <button data-speed="350" class="seg-btn">4×</button>
+      </div>
+    </div>
+    <div class="ctl-spacer"></div>
+    <div class="ctl-group transport">
+      <button id="btn-play" class="btn-transport primary"><i data-feather="play"></i><span>Play</span></button>
+      <button id="btn-reset" class="btn-transport"><i data-feather="rotate-ccw"></i><span>Reset</span></button>
+    </div>
+  </div>
+
+  <!-- ── Real-model status ────────────────────────────────────────────── -->
+  <div class="model-status-row fade-in fade-in-3" id="model-status" style="display:none"></div>
+
+  <!-- ── Scenario "what to watch" ─────────────────────────────────────── -->
+  <div class="watch-banner fade-in fade-in-3" id="watch-banner">
+    <i data-feather="eye"></i>
+    <div><b id="watch-title">What to watch</b><span id="watch-text">—</span></div>
+  </div>
+
+  <!-- ── Stage: topology canvas(es) + side rail ───────────────────────── -->
+  <div class="sim-stage fade-in fade-in-4">
+    <div class="stage-main">
+      <div class="stage-progress"><div class="stage-progress-fill" id="tick-fill"></div></div>
+      <div id="canvas-wrap" class="canvas-wrap single">
+        <div class="topo-panel" id="panelA">
+          <div class="topo-panel-head"><span class="tp-tag" id="tagA">DQN</span><span class="tp-sub" id="subA"></span></div>
+          <svg class="topo-stage-svg" id="svgA" viewBox="0 0 960 560" preserveAspectRatio="xMidYMid meet"></svg>
+        </div>
+        <div class="topo-panel" id="panelB" style="display:none">
+          <div class="topo-panel-head"><span class="tp-tag base" id="tagB">Baseline</span><span class="tp-sub" id="subB"></span></div>
+          <svg class="topo-stage-svg" id="svgB" viewBox="0 0 960 560" preserveAspectRatio="xMidYMid meet"></svg>
+        </div>
+      </div>
+      <div class="path-legend" id="path-legend"></div>
+    </div>
+
+    <aside class="stage-rail">
+      <div class="kpi-stack" id="kpi-stack"></div>
+      <div class="rail-panel">
+        <div class="rail-panel-title">Cumulative Reward</div>
+        <svg id="reward-spark" viewBox="0 0 280 120" preserveAspectRatio="none" style="width:100%;height:120px"></svg>
+        <div class="spark-legend">
+          <span><i style="background:var(--green)"></i>DQN <b id="spark-dqn">—</b></span>
+          <span><i style="background:#94a3b8"></i>Baseline <b id="spark-base">—</b></span>
+        </div>
+      </div>
+      <div class="rail-panel">
+        <div class="rail-panel-title">Link Utilisation</div>
+        <div id="util-bars" class="util-bars-sim"></div>
+      </div>
+    </aside>
+  </div>
+</main>
+
+<script src="sim-engine.js"></script>
+<script src="shared.js"></script>
+<script>
+/* ═══════════════════════════════════════════════════════════════════════
+   Simulation Lab controller
+   ═══════════════════════════════════════════════════════════════════════ */
+
+// Light init — no SSE (this page is fully client-side)
+injectNav('simulation'); initTheme(); initIcons();
+
+const state = {
+  topoId: 'cluster3',
+  scenarioId: 'rush',
+  mode: 'dqn',            // dqn | baseline | compare
+  baselineId: 'shortest_path',
+  dqnSource: 'emulated',  // emulated | real
+  speed: 1100,
+  playing: false,
+  engine: null,
+  frame: null,
+  timer: null,
+  stateSeq: null,         // rolling 10-step state buffer for the real model
+  realAvailable: null,
+};
+
+/* ── Preference persistence (survives tab switches / reloads) ──────────── */
+const PREFS_KEY = 'sdn-sim-prefs';
+function persistPrefs() {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify({
+      topoId: state.topoId, scenarioId: state.scenarioId, mode: state.mode,
+      baselineId: state.baselineId, dqnSource: state.dqnSource,
+      speed: state.speed, playing: state.playing,
+    }));
+  } catch (e) {}
+}
+function loadPrefs() {
+  try {
+    const p = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
+    if (p.topoId && SIM.TOPOLOGIES[p.topoId]) state.topoId = p.topoId;
+    if (p.scenarioId && SIM.SCENARIOS[p.scenarioId]) state.scenarioId = p.scenarioId;
+    if (['dqn','baseline','compare'].includes(p.mode)) state.mode = p.mode;
+    if (p.baselineId && SIM.POLICIES[p.baselineId]) state.baselineId = p.baselineId;
+    if (['emulated','real'].includes(p.dqnSource)) state.dqnSource = p.dqnSource;
+    if (p.speed) state.speed = p.speed;
+    state._resumePlaying = !!p.playing;
+    // real model is only valid on the cluster3 topology
+    if (state.dqnSource === 'real' && state.topoId !== SIM.REAL_TOPO) state.dqnSource = 'emulated';
+    if (state.dqnSource === 'real') state._everReal = true;
+  } catch (e) {}
+}
+function syncControls() {
+  document.querySelectorAll('#mode-seg .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === state.mode));
+  document.querySelectorAll('#src-seg .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.src === state.dqnSource));
+  document.querySelectorAll('#speed-seg .seg-btn').forEach(b => b.classList.toggle('active', +b.dataset.speed === state.speed));
+  const sel = document.getElementById('baseline-select'); if (sel) sel.value = state.baselineId;
+}
+
+/* ── Build topology + scenario cards ──────────────────────────────────── */
+function buildTopoCards() {
+  const el = document.getElementById('topo-cards');
+  el.innerHTML = Object.values(SIM.TOPOLOGIES).map(t => `
+    <button class="topo-card ${t.id===state.topoId?'active':''}" data-topo="${t.id}">
+      <div class="tc-mini">${miniTopoSVG(t)}</div>
+      <div class="tc-body">
+        <div class="tc-name">${t.name}</div>
+        <div class="tc-tag">${t.tag}</div>
+      </div>
+    </button>`).join('');
+  el.querySelectorAll('.topo-card').forEach(b =>
+    b.onclick = () => { state.topoId = b.dataset.topo; rebuild(); });
+}
+
+function buildScenarioCards() {
+  const el = document.getElementById('scenario-cards');
+  el.innerHTML = Object.values(SIM.SCENARIOS).map(s => `
+    <button class="scenario-card ${s.id===state.scenarioId?'active':''}" data-sc="${s.id}">
+      <span class="sc-icon">${s.icon}</span>
+      <span class="sc-name">${s.name}</span>
+      <span class="sc-desc">${s.desc}</span>
+    </button>`).join('');
+  el.querySelectorAll('.scenario-card').forEach(b =>
+    b.onclick = () => { state.scenarioId = b.dataset.sc; rebuild(); });
+}
+
+/* tiny inline topology thumbnail */
+function miniTopoSVG(t) {
+  const minX=Math.min(...t.nodes.map(n=>n.x)), maxX=Math.max(...t.nodes.map(n=>n.x));
+  const minY=Math.min(...t.nodes.map(n=>n.y)), maxY=Math.max(...t.nodes.map(n=>n.y));
+  const sx=v=>((v-minX)/(maxX-minX||1))*64+8, sy=v=>((v-minY)/(maxY-minY||1))*48+6;
+  const nm={}; t.nodes.forEach(n=>nm[n.id]=n);
+  const lines=t.links.map(l=>{const a=nm[l.a],b=nm[l.b];
+    return `<line x1="${sx(a.x)}" y1="${sy(a.y)}" x2="${sx(b.x)}" y2="${sy(b.y)}" stroke="currentColor" stroke-width="1" opacity=".45"/>`;}).join('');
+  const dots=t.nodes.map(n=>`<circle cx="${sx(n.x)}" cy="${sy(n.y)}" r="${n.type==='dc'||n.type==='cluster'?3:2.4}" fill="currentColor" opacity=".9"/>`).join('');
+  return `<svg viewBox="0 0 80 60">${lines}${dots}</svg>`;
+}
+
+/* ── Controls wiring ──────────────────────────────────────────────────── */
+function buildBaselineSelect() {
+  const sel = document.getElementById('baseline-select');
+  sel.innerHTML = SIM.BASELINE_POLICY_IDS.map(id =>
+    `<option value="${id}" ${id===state.baselineId?'selected':''}>${SIM.POLICIES[id].label}</option>`).join('');
+  sel.onchange = () => { state.baselineId = sel.value; rebuild(); };
+}
+
+document.getElementById('mode-seg').onclick = e => {
+  const b = e.target.closest('.seg-btn'); if(!b) return;
+  document.querySelectorAll('#mode-seg .seg-btn').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active'); state.mode = b.dataset.mode; applyMode();
+};
+document.getElementById('speed-seg').onclick = e => {
+  const b = e.target.closest('.seg-btn'); if(!b) return;
+  document.querySelectorAll('#speed-seg .seg-btn').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active'); state.speed = +b.dataset.speed;
+  persistPrefs();
+  if(state.playing){ pause(); play(); }
+};
+document.getElementById('src-seg').onclick = e => {
+  const b = e.target.closest('.seg-btn'); if(!b) return;
+  const src = b.dataset.src;
+  if (src === 'real' && state.topoId !== SIM.REAL_TOPO) {
+    showModelStatus(`The trained model only understands the “${SIM.TOPOLOGIES[SIM.REAL_TOPO].name}” topology `+
+      `(fixed 26-feature input, 6 path-actions). Switch to it to route with the real DQN.`, 'warn');
+    return;   // don't activate real mode on an incompatible topology
+  }
+  if (src === 'real') state._everReal = true;
+  setSrc(src);
+  if (src === 'real') fetchModelStatus(); else showModelStatus('', '');
+  rebuild();
+};
+function setSrc(src) {
+  if (src === 'emulated') trainStop();   // leaving real mode → end the session
+  state.dqnSource = src;
+  document.querySelectorAll('#src-seg .seg-btn').forEach(x =>
+    x.classList.toggle('active', x.dataset.src === src));
+}
+
+document.getElementById('btn-play').onclick = () => state.playing ? pause() : play();
+document.getElementById('btn-reset').onclick = () => { rebuild(); };
+
+/* ── Real-model status + inference bridge ─────────────────────────────── */
+function showModelStatus(text, tone) {
+  const el = document.getElementById('model-status');
+  if (!text) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = '';
+  el.className = 'model-status-row tone-' + (tone || 'neutral');
+  el.innerHTML = `<span class="ms-dot"></span><span>${text}</span>`;
+}
+
+async function fetchModelStatus() {
+  try {
+    const r = await fetch(`${API}/api/dqn/status`, { cache: 'no-store' });
+    const d = await r.json();
+    if (!d.available) {
+      state.realAvailable = false;
+      showModelStatus(`Real model unavailable — ${d.error || 'API not reachable'}. `+
+        `Start the API (python3 api/app.py) in your venv (torch installed).`, 'bad');
+      return;
+    }
+    if (!d.weights_exists || !d.trained) {
+      state.realAvailable = true;
+      showModelStatus(`Model architecture loaded but not trained yet (steps=${d.steps}). `+
+        `Run train.py to create model_weights.pth — then these become the learned policy.`, 'warn');
+      return;
+    }
+    state.realAvailable = true;
+    showModelStatus(`✓ Real DQN connected — trained ${d.steps.toLocaleString()} steps · `+
+      `greedy (exploitation) decisions · this is your actual model.`, 'good');
+  } catch (e) {
+    state.realAvailable = false;
+    showModelStatus(`Real model unavailable — could not reach the API at ${API}. Is api/app.py running?`, 'bad');
+  }
+}
+
+async function decide(seq) {
+  try {
+    const r = await fetch(`${API}/api/dqn/decide`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seq }),
+    });
+    const d = await r.json();
+    if (!d.available || d.error) return { ok: false, error: d.error || 'unavailable' };
+    return { ok: true, action: d.action, q: d.q, trained: d.trained };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+/* ── Engine lifecycle ─────────────────────────────────────────────────── */
+function rebuild() {
+  pause();
+  trainStop();                        // end any prior training session (saves weights)
+  state._needStart = (state.dqnSource === 'real');
+  state.obs = { counts: {}, baseCounts: {}, baseAction: 0, flows: [] };
+  buildTopoCards(); buildScenarioCards();
+  const topo = SIM.TOPOLOGIES[state.topoId];
+  const sc   = SIM.SCENARIOS[state.scenarioId];
+  state.engine = new SIM.Engine({
+    topoId: state.topoId, scenarioId: state.scenarioId,
+    policyId: 'dqn', baselineId: state.baselineId, intensity: 1, seed: 1234,
+  });
+  viewA.setTopo(topo); viewB.setTopo(topo);
+  if (topo.pathKeys.length <= 1) {
+    document.getElementById('watch-title').textContent = `${topo.name} — the control case`;
+    document.getElementById('watch-text').textContent =
+      'This topology offers only one route, so DQN and the baseline are necessarily ' +
+      'identical here. That is the point: AI routing can only help when the network ' +
+      'has path diversity to exploit — switch to another topology to see DQN pull ahead.';
+  } else {
+    document.getElementById('watch-title').textContent = `${sc.icon} ${sc.name} — what to watch`;
+    document.getElementById('watch-text').textContent = sc.watch;
+  }
+  buildPathLegend(topo);
+  state.frame = null;       // avoid rendering a stale frame against the new topology
+  state.stateSeq = null;    // fresh rolling buffer for the real model
+  applyMode();
+  // prime one frame so the stage isn't empty, then reset — this is just a
+  // static preview; play() starts a clean run from tick 0 (emulated or real)
+  state.frame = state.engine.step();
+  render(state.frame);
+  state.engine.reset();
+  setStatus('Ready — press Play', false);
+}
+
+function applyMode() {
+  const compare = state.mode === 'compare';
+  document.getElementById('panelB').style.display = compare ? '' : 'none';
+  document.getElementById('canvas-wrap').classList.toggle('compare', compare);
+  document.getElementById('canvas-wrap').classList.toggle('single', !compare);
+  const dqnLabel = (state.dqnSource === 'real' && state.topoId === SIM.REAL_TOPO) ? 'Real DQN' : 'DQN';
+  const tagA = document.getElementById('tagA');
+  if (state.mode === 'dqn')      { tagA.textContent = dqnLabel;   tagA.className = 'tp-tag'; }
+  if (state.mode === 'baseline') { tagA.textContent = 'Baseline'; tagA.className = 'tp-tag base'; }
+  if (compare)                   { tagA.textContent = dqnLabel;   tagA.className = 'tp-tag'; }
+  if (state.frame) render(state.frame);
+  persistPrefs();
+}
+
+function setPlayBtn(playing) {
+  const b = document.getElementById('btn-play'); if (!b) return;
+  b.innerHTML = playing ? '<i data-feather="pause"></i><span>Pause</span>'
+                        : '<i data-feather="play"></i><span>Play</span>';
+  feather.replace({'stroke-width':2,width:15,height:15});
+}
+
+function play() {
+  if (!state.engine) return;
+  state.playing = true;
+  persistPrefs();
+  setPlayBtn(true);
+  const useReal = state.dqnSource === 'real' && state.topoId === SIM.REAL_TOPO;
+  setStatus(useReal ? 'Running · real DQN' : 'Running', true);
+  if (useReal) realLoop(); else emuLoop();
+}
+
+function emuLoop() {
+  if (!state.playing) return;
+  state.frame = state.engine.step();
+  render(state.frame);
+  if (state.frame.tick >= state.frame.length) state.engine.reset();   // loop seamlessly
+  state.timer = setTimeout(emuLoop, state.speed);
+}
+
+/* ── Real training loop ───────────────────────────────────────────────────
+   The browser sim is the ENVIRONMENT; the server's real DQNAgent is the LEARNER.
+   Each tick we post the observed state, the server trains the real network on
+   the previous transition (real reward + gradient step + ε-decay) and returns
+   the next ε-greedy action, which we apply. Every metric is pushed to
+   shared_state server-side, so all the other tabs light up from this session. */
+const zeros26 = () => new Array(SIM.STATE_DIM_SIM).fill(0);
+
+function modalActionIndex(counts) {
+  let bestK = null, bestV = -1;
+  for (const k of Object.keys(counts || {})) if (counts[k] > bestV) { bestV = counts[k]; bestK = k; }
+  const i = SIM.ACTION_KEYS.indexOf(bestK);
+  return i < 0 ? 0 : i;
+}
+
+function buildFlowList(f) {
+  const out = []; let i = 0;
+  for (const [fid, p] of Object.entries(f.dqn.assign)) {
+    const bp = f.base.assign[fid];
+    const flow = f.flows.find(x => x.id === fid) || {};
+    out.push({
+      flow: fid, dqn_path: 'PATH_' + p.key,
+      baseline_path: bp ? 'PATH_' + bp.key : '?',
+      agreed: bp ? (p.key === bp.key) : null,
+      priority: !!flow.priority, age_s: f.tick,
+    });
+    if (++i >= 14) break;
+  }
+  return out;
+}
+
+async function trainStart() {
+  try {
+    const r = await fetch(`${API}/api/sim/start`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topology: state.topoId, scenario: state.scenarioId, baseline: state.baselineId }),
+    });
+    const d = await r.json();
+    return d.ok ? { ok: true, ...d } : { ok: false, error: d.error || 'unavailable' };
+  } catch (e) { return { ok: false, error: String(e) }; }
+}
+async function trainTick(payload) {
+  try {
+    const r = await fetch(`${API}/api/sim/tick`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    return (!d.available || d.error) ? { ok: false, error: d.error || 'unavailable' } : { ok: true, ...d };
+  } catch (e) { return { ok: false, error: String(e) }; }
+}
+function trainStop() {
+  if (!state._everReal) return;          // never touched real mode → nothing to stop
+  try { fetch(`${API}/api/sim/stop`, { method: 'POST' }); } catch (e) {}
+}
+
+async function realLoop() {
+  // start a training episode on first entry after a (re)build
+  if (state._needStart) {
+    const s = await trainStart();
+    if (!state.playing) return;
+    if (!s.ok) {
+      showModelStatus(`Couldn’t start training (${s.error}) — is the API running? Falling back to emulated.`, 'bad');
+      setSrc('emulated'); emuLoop(); return;
+    }
+    state._needStart = false;
+    state.dqnSeq = state.engine.initialSeq();
+    state.baseVec = zeros26();
+    state.obs = { counts: {}, baseCounts: {}, baseAction: 0, flows: [] };
+  }
+  if (!state.playing) return;
+
+  const dec = await trainTick({
+    seq: state.dqnSeq, counts: state.obs.counts,
+    base_seq: [state.baseVec], base_action: state.obs.baseAction,
+    base_counts: state.obs.baseCounts, flows: state.obs.flows,
+  });
+  if (!state.playing) return;                 // paused during the await
+  if (!dec.ok) {
+    showModelStatus(`Training step failed (${dec.error}) — falling back to emulated routing.`, 'bad');
+    setSrc('emulated'); emuLoop(); return;
+  }
+
+  // apply the action the REAL agent just chose
+  const f = state.engine.stepReal(dec.action);
+  state.frame = f;
+  render(f);
+
+  // prepare next observation from the resulting network state
+  const anyPrio = f.flows.some(x => x.priority);
+  state.dqnSeq = f.stateSeq;
+  state.baseVec = SIM.buildStateVecCluster3(f.base.util, f.base.counts, anyPrio, 0);
+  state.obs = {
+    counts: f.dqn.counts, baseCounts: f.base.counts,
+    baseAction: modalActionIndex(f.base.counts), flows: buildFlowList(f),
+  };
+
+  // live training badge
+  const dEps = (+dec.epsilon).toFixed(3);
+  const learning = dec.loss != null;
+  const prog = learning ? ` · loss ${(+dec.loss).toFixed(4)}`
+                        : ` · filling replay buffer ${dec.buffer}/${dec.batch}`;
+  showModelStatus(`● Training the REAL DQN — episode ${dec.episode} · step ${dec.steps.toLocaleString()} · `+
+    `ε=${dEps}${prog} · Δreward ${(dec.dqn_total - dec.base_total).toFixed(1)} · all tabs live`, 'good');
+
+  if (f.tick >= f.length) {                    // loop the scenario, keep training
+    state.engine.reset();
+    state.dqnSeq = state.engine.initialSeq();
+    state.baseVec = zeros26();
+  }
+  state.timer = setTimeout(realLoop, state.speed);
+}
+
+function pause() {
+  state.playing = false;
+  persistPrefs();
+  if (state.timer) clearTimeout(state.timer);
+  setPlayBtn(false);
+  setStatus('Paused', false);
+}
+
+function setStatus(text, live) {
+  document.getElementById('hs-text').textContent = text;
+  document.getElementById('hero-status').classList.toggle('live', !!live);
+}
+
+/* ── Render a frame ───────────────────────────────────────────────────── */
+function render(f) {
+  // progress
+  document.getElementById('tick-fill').style.width = `${Math.min(100,(f.tick/f.length)*100)}%`;
+  const ep=document.getElementById('nav-episode'); if(ep) ep.textContent = `${f.scenario.icon} ${f.scenario.name}`;
+  const ut=document.getElementById('nav-uptime'); if(ut) ut.textContent = `tick ${f.tick}`;
+
+  if (state.mode === 'compare') {
+    viewA.update(f.dqn, f, 'DQN');
+    viewB.update(f.base, f, 'Baseline');
+    document.getElementById('subA').textContent = `peak ${pct(peak(f.dqn.util))} · reward ${f.cumDqn.toFixed(1)}`;
+    document.getElementById('subB').textContent = `peak ${pct(peak(f.base.util))} · reward ${f.cumBase.toFixed(1)}`;
+  } else {
+    const res = state.mode === 'baseline' ? f.base : f.dqn;
+    viewA.update(res, f, state.mode === 'baseline' ? 'Baseline' : 'DQN');
+    const modelTag = (f.real && state.mode !== 'baseline' && f.usedKey)
+      ? ` · model→Path ${f.usedKey}` : '';
+    document.getElementById('subA').textContent =
+      `${f.scenario.name} · ${f.flows.length} flows · peak ${pct(peak(res.util))}${modelTag}`;
+  }
+
+  renderKPIs(f);
+  renderSimUtilBars(f);
+  renderSpark(f.history);
+  renderPathLegend(f);
+}
+
+const peak = u => Math.max(0, ...Object.values(u));
+const avg  = u => { const v=Object.values(u); return v.length? v.reduce((a,b)=>a+b,0)/v.length:0; };
+const pct  = v => Math.round(v*100)+'%';
+
+/* ── KPI cards ────────────────────────────────────────────────────────── */
+function renderKPIs(f) {
+  const showBase = state.mode==='baseline';
+  const main = showBase ? f.base : f.dqn;
+  const delta = f.cumDqn - f.cumBase;
+  const cards = [
+    { label:'Peak Link Util', val:pct(peak(main.util)),
+      tone: peak(main.util)>.85?'bad':peak(main.util)>.6?'warn':'good',
+      sub:'busiest link' },
+    { label:'Avg Util', val:pct(avg(main.util)), tone:'neutral', sub:'all links' },
+    { label:'Delivered', val:pct(main.offered? main.delivered/main.offered : 1),
+      tone: (main.delivered/Math.max(1,main.offered))>.95?'good':'warn', sub:'of offered load' },
+    { label:'Reward (this policy)', val:main.reward.total.toFixed(2), tone:'accent', sub:'0–1 per tick' },
+    { label:'DQN advantage', val:(delta>=0?'+':'')+delta.toFixed(1),
+      tone: delta>=0?'good':'bad', sub:'cumulative Δ vs baseline' },
+  ];
+  document.getElementById('kpi-stack').innerHTML = cards.map(c=>`
+    <div class="kpi-card tone-${c.tone}">
+      <div class="kpi-label">${c.label}</div>
+      <div class="kpi-val">${c.val}</div>
+      <div class="kpi-sub">${c.sub}</div>
+    </div>`).join('');
+}
+
+/* ── Per-link utilisation bars ────────────────────────────────────────── */
+function renderSimUtilBars(f) {
+  const res = state.mode==='baseline' ? f.base : f.dqn;
+  const topo = f.topo;
+  // show only the "interesting" core/agg links (skip 1000-cap DC/host links)
+  const links = topo.links.filter(l => l.cap <= 200);
+  document.getElementById('util-bars').innerHTML = links.map(l=>{
+    const u = res.util[l.id]||0, down = f.down[l.id];
+    const pctv = Math.min(100, Math.round(u*100));
+    const col = down?'#64748b': u>.85?'var(--red)': u>.6?'var(--yellow)':'var(--green)';
+    const nm = l.id.replace('~','→');
+    return `<div class="ub-row ${down?'down':''}">
+      <span class="ub-label">${nm}</span>
+      <div class="ub-track"><div class="ub-fill" style="width:${pctv}%;background:${col}"></div></div>
+      <span class="ub-val" style="color:${col}">${down?'DOWN':pctv+'%'}</span>
+    </div>`;
+  }).join('');
+}
+
+/* ── Path legend (counts) ─────────────────────────────────────────────── */
+let _legendKeys = [];
+function buildPathLegend(topo) { _legendKeys = topo.pathKeys.slice(); }
+function renderPathLegend(f) {
+  const res = state.mode==='baseline' ? f.base : f.dqn;
+  const topo = f.topo;
+  document.getElementById('path-legend').innerHTML = _legendKeys.map(k=>{
+    const c = res.counts[k]||0;
+    return `<span class="pl-item"><i style="background:${topo.pathColor[k]}"></i>${k}<b>${c}</b></span>`;
+  }).join('');
+}
+
+/* ── Cumulative reward sparkline ──────────────────────────────────────── */
+function renderSpark(h) {
+  const svg = d3.select('#reward-spark'); svg.selectAll('*').remove();
+  document.getElementById('spark-dqn').textContent  = h.length? h[h.length-1].dqnReward.toFixed(1):'—';
+  document.getElementById('spark-base').textContent = h.length? h[h.length-1].baseReward.toFixed(1):'—';
+  if (h.length<2) return;
+  const W=280,H=120,M=6;
+  const x=d3.scaleLinear().domain([0,h.length-1]).range([M,W-M]);
+  const all=h.flatMap(d=>[d.dqnReward,d.baseReward]);
+  const y=d3.scaleLinear().domain([Math.min(0,d3.min(all)),d3.max(all)||1]).range([H-M,M]);
+  svg.append('path').datum(h).attr('fill','none').attr('stroke','#94a3b8').attr('stroke-width',2)
+    .attr('d',d3.line().x((_,i)=>x(i)).y(d=>y(d.baseReward)).curve(d3.curveMonotoneX));
+  svg.append('path').datum(h).attr('fill','rgba(34,197,94,.12)')
+    .attr('d',d3.area().x((_,i)=>x(i)).y0(d=>y(d.baseReward)).y1(d=>y(d.dqnReward)).curve(d3.curveMonotoneX));
+  svg.append('path').datum(h).attr('fill','none').attr('stroke','var(--green)').attr('stroke-width',2.5)
+    .attr('d',d3.line().x((_,i)=>x(i)).y(d=>y(d.dqnReward)).curve(d3.curveMonotoneX));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TopoView — renders a topology into an SVG and animates packet dots that
+   travel ONLY along the paths the routing actually chose.
+   ═══════════════════════════════════════════════════════════════════════ */
+class TopoView {
+  constructor(svgId) {
+    this.svg = document.getElementById(svgId);
+    this.topo = null;
+    this.dots = [];       // {el, pathEl, progress, speed, solid}
+    this.pathEls = {};    // key → hidden <path> for getPointAtLength
+  }
+
+  setTopo(topo) {
+    this.topo = topo; this.dots = []; this.pathEls = {};
+    const svg = d3.select(this.svg); svg.selectAll('*').remove();
+    const defs = svg.append('defs');
+    const nm = topo.nodeMap;
+
+    // hidden path elements (one per path key, using first ingress as canonical
+    // geometry — all ingresses share core geometry; per-ingress handled live)
+    this._ingressPathEls = {};   // `${ingress}|${key}` → pathEl
+
+    // links (static layer; coloured live in update)
+    this.linkSel = {};
+    topo.links.forEach(l => {
+      const a=nm[l.a], b=nm[l.b];
+      const line = svg.append('line')
+        .attr('x1',a.x).attr('y1',a.y).attr('x2',b.x).attr('y2',b.y)
+        .attr('stroke','var(--border)').attr('stroke-width',2)
+        .attr('stroke-linecap','round').attr('class','stage-link');
+      this.linkSel[l.id] = line;
+      // util label holder
+      const mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
+      if (l.cap<=200) {
+        this.linkSel[l.id+'_t'] = svg.append('text')
+          .attr('x',mx).attr('y',my-6).attr('text-anchor','middle')
+          .attr('font-size',12).attr('font-weight',700).attr('fill','transparent')
+          .attr('class','stage-link-label');
+      }
+    });
+
+    // build per-ingress hidden geometry paths
+    topo.ingress.forEach(ing => {
+      topo.getPaths(ing).forEach(p => {
+        const d = 'M' + p.nodes.map(id=>`${nm[id].x},${nm[id].y}`).join(' L');
+        const el = defs.append('path').attr('d',d).node();
+        this._ingressPathEls[`${ing}|${p.key}`] = el;
+      });
+    });
+
+    // nodes
+    topo.nodes.forEach(n => this._drawNode(svg, n));
+    this.dotLayer = svg.append('g').attr('class','dot-layer');
+  }
+
+  _drawNode(svg, n) {
+    const g = svg.append('g').attr('transform',`translate(${n.x},${n.y})`).attr('class','stage-node');
+    const TYPE = {
+      cluster:{shape:'rect', w:104,h:44, rx:10, fill:'url(#none)', cls:'n-cluster'},
+      edge:{r:20, cls:'n-edge'}, core:{r:24, cls:'n-core'},
+      agg:{r:22, cls:'n-agg'}, dc:{shape:'rect', w:130,h:46, rx:10, cls:'n-dc'},
+    };
+    const t = TYPE[n.type]||{r:18};
+    const COL = {
+      A:'#3b82f6', B:'#8b5cf6', C:'#06b6d4',
+    };
+    if (t.shape==='rect') {
+      const fill = n.type==='dc' ? '#0f766e' : (COL[n.cluster]||'#475569');
+      g.append('rect').attr('x',-t.w/2).attr('y',-t.h/2).attr('width',t.w).attr('height',t.h)
+        .attr('rx',t.rx).attr('fill',fill).attr('opacity',.16)
+        .attr('stroke',fill).attr('stroke-width',1.5);
+      g.append('text').attr('y',n.sub?-2:5).attr('text-anchor','middle')
+        .attr('font-size',13).attr('font-weight',700).attr('fill',fill).text(n.label);
+      if (n.sub) g.append('text').attr('y',13).attr('text-anchor','middle')
+        .attr('font-size',10).attr('fill',fill).attr('opacity',.8).text(n.sub);
+    } else {
+      const fill = n.type==='core' ? '#6366f1' : n.type==='agg' ? '#0891b2'
+                 : (COL[n.cluster]||'#475569');
+      g.append('circle').attr('r',t.r).attr('fill',fill)
+        .attr('stroke','var(--surface)').attr('stroke-width',2.5);
+      g.append('text').attr('y',4).attr('text-anchor','middle')
+        .attr('font-size',12).attr('font-weight',700).attr('fill','#fff').text(n.label);
+      if (n.sub) g.append('text').attr('y',t.r+13).attr('text-anchor','middle')
+        .attr('font-size',9.5).attr('fill','var(--text-muted)').text(n.sub);
+    }
+  }
+
+  update(res, frame, tagText) {
+    const topo = this.topo;
+    // 1) colour links by realised utilisation (same numbers as the bars)
+    topo.links.forEach(l => {
+      const u = res.util[l.id]||0, down = frame.down[l.id];
+      const sel = this.linkSel[l.id];
+      let col, w, op;
+      if (down) { col='#64748b'; w=2; op=.5; sel.attr('stroke-dasharray','7,6'); }
+      else {
+        sel.attr('stroke-dasharray',null);
+        col = u>.85?'#ef4444': u>.6?'#f59e0b': u>.15?'#22c55e':'var(--border)';
+        w = 2 + Math.min(1,u)*6; op = u>.05?0.95:0.4;
+      }
+      sel.attr('stroke',col).attr('stroke-width',w).attr('opacity',op);
+      const tl = this.linkSel[l.id+'_t'];
+      if (tl) {
+        if (down) tl.attr('fill','#94a3b8').text('DOWN');
+        else if (u>0.05) tl.attr('fill',col).text(Math.round(u*100)+'%');
+        else tl.attr('fill','transparent');
+      }
+    });
+
+    // 2) rebuild dot set from the SAME assignment that produced the util above.
+    //    Preserve each dot's progress across rebuilds so that when routing is
+    //    steady the packets keep flowing smoothly (no per-tick snap-back); only
+    //    when a flow actually re-routes do its dots move to the new path.
+    const prev = {};
+    this.dots.forEach(d => { if (d.gk != null) prev[d.gk] = d.progress; });
+    this.dotLayer.selectAll('*').remove();
+    this.dots = [];
+    // group assigned flows by (ingress,pathKey) and sum rate → dot count
+    const groups = {};
+    Object.entries(res.assign).forEach(([fid,p]) => {
+      const flow = frame.flows.find(x=>x.id===fid); if(!flow) return;
+      const k = `${flow.ingress}|${p.key}`;
+      (groups[k] = groups[k] || {key:p.key, ingress:flow.ingress, color:p.color, rate:0, prio:false});
+      groups[k].rate += flow.rate;
+      if (flow.priority) groups[k].prio = true;
+    });
+    Object.values(groups).forEach(g => {
+      const pathEl = this._ingressPathEls[`${g.ingress}|${g.key}`];
+      if (!pathEl) return;
+      const n = Math.max(1, Math.min(6, Math.round(g.rate/4)));
+      for (let i=0;i<n;i++) {
+        const gk = `${g.ingress}|${g.key}#${i}`;
+        const c = document.createElementNS('http://www.w3.org/2000/svg','circle');
+        c.setAttribute('r', g.prio?6:5);
+        c.setAttribute('fill', g.color);
+        c.setAttribute('opacity','0.95');
+        if (g.prio){ c.setAttribute('stroke','#fff'); c.setAttribute('stroke-width','1.5'); }
+        this.dotLayer.node().appendChild(c);
+        this.dots.push({ el:c, pathEl, progress: prev[gk] ?? (i/n), speed:0.42, gk });
+      }
+    });
+  }
+}
+
+const viewA = new TopoView('svgA');
+const viewB = new TopoView('svgB');
+
+/* ── Shared rAF dot animation (smooth, pause-aware) ───────────────────── */
+let _last=null;
+function animate(ts){
+  if(_last===null) _last=ts;
+  const dt=Math.min((ts-_last)/1000,0.05); _last=ts;
+  const run = state.playing;
+  [viewA,viewB].forEach(v=>{
+    v.dots.forEach(d=>{
+      if(run) d.progress=(d.progress+d.speed*dt)%1;
+      try{
+        const len=d.pathEl.getTotalLength();
+        const pt=d.pathEl.getPointAtLength(d.progress*len);
+        d.el.setAttribute('cx',pt.x); d.el.setAttribute('cy',pt.y);
+      }catch(e){}
+    });
+  });
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+
+/* ── Boot ─────────────────────────────────────────────────────────────── */
+buildBaselineSelect();
+loadPrefs();        // restore topology/scenario/view/speed/source from last visit
+syncControls();
+rebuild();
+if (state.dqnSource === 'real') fetchModelStatus();
+if (state._resumePlaying) play();   // keep running across tab switches
+window.addEventListener('beforeunload', persistPrefs);
+feather.replace({'stroke-width':2,width:15,height:15});
+</script>
+</body>
+</html>

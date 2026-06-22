@@ -5,127 +5,139 @@
   <meta name="color-scheme" content="dark light">
   <script>(function(){var t=localStorage.getItem('sdn-theme')||'light';document.documentElement.setAttribute('data-theme',t);document.documentElement.style.background=t==='dark'?'#0f172a':'#f8fafc';})();</script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Overview — AI-SDN Dashboard</title>
+  <title>AI-Driven SDN Traffic Controller</title>
   <link rel="stylesheet" href="styles.css">
-  <script src="https://d3js.org/d3.v7.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
 </head>
 <body>
 <nav id="main-nav"></nav>
-<main class="page">
-  <div class="page-header fade-in">
-    <h1 class="page-title">System Overview</h1>
-    <p class="page-subtitle">Live snapshot of the AI-driven SDN controller and network state</p>
-  </div>
 
-  <div class="stats-row fade-in fade-in-1" style="margin-bottom:20px">
-    <div class="stat-card"><div class="stat-label">Epsilon (ε)</div><div class="stat-value" id="v-eps">—</div><div class="stat-sub">1.0 → 0.01 over training</div></div>
-    <div class="stat-card"><div class="stat-label">Learn Steps</div><div class="stat-value" id="v-steps">—</div><div class="stat-sub">gradient updates</div></div>
-    <div class="stat-card"><div class="stat-label">Last Loss</div><div class="stat-value" id="v-loss">—</div><div class="stat-sub">Huber / smooth-L1</div></div>
-    <div class="stat-card"><div class="stat-label">DQN Reward</div><div class="stat-value" id="v-dqn" style="color:var(--green)">—</div><div class="stat-sub">cumulative this session</div></div>
-    <div class="stat-card"><div class="stat-label">Baseline Reward</div><div class="stat-value" id="v-base" style="color:var(--pathB)">—</div><div class="stat-sub">shadow comparison</div></div>
-    <div class="stat-card"><div class="stat-label">Current Winner</div><div class="stat-value" id="v-winner">—</div><div class="stat-sub" id="v-delta-sub">Δ —</div></div>
-  </div>
+<main class="landing">
 
-  <div class="grid grid-32 fade-in fade-in-2" style="margin-bottom:20px">
-    <div class="panel">
-      <div class="panel-title">DQN vs Baseline — Cumulative Reward <span class="tip" title="Green=DQN, Purple dashed=Baseline">?</span></div>
-      <div class="legend">
-        <div class="leg-item"><div class="leg-line" style="background:var(--green)"></div> DQN</div>
-        <div class="leg-item"><div class="leg-line" style="background:var(--pathB);border-top:2px dashed var(--pathB);height:0"></div> Baseline</div>
+  <!-- ── Hero ─────────────────────────────────────────────────────────── -->
+  <section class="hero-land">
+    <div class="hero-orb hero-orb-a"></div>
+    <div class="hero-orb hero-orb-b"></div>
+    <div class="hero-land-inner fade-in">
+      <span class="hero-pill"><span class="pill-dot"></span> Deep Reinforcement Learning · Software-Defined Networking</span>
+      <h1 class="hero-land-title">Networks that<br><span class="grad">learn to route themselves</span></h1>
+      <p class="hero-land-sub">
+        An AI-driven SDN traffic controller. A Dueling&nbsp;LSTM Deep-Q-Network watches live
+        network state and chooses optimal paths in real time — beating classical routing on
+        latency, reliability, throughput and fairness.
+      </p>
+      <div class="hero-land-cta">
+        <a class="btn-land primary" href="simulation.html"><i data-feather="play-circle"></i> Launch Simulation Lab</a>
+        <a class="btn-land" href="overview.html"><i data-feather="grid"></i> Open Live Dashboard</a>
       </div>
-      <svg id="reward-svg" class="chart-svg" style="height:200px"></svg>
+      <div class="hero-stats">
+        <div class="hs"><b>7</b><span>switches</span></div>
+        <div class="hs-div"></div>
+        <div class="hs"><b>18</b><span>IoT hosts</span></div>
+        <div class="hs-div"></div>
+        <div class="hs"><b>6</b><span>path actions</span></div>
+        <div class="hs-div"></div>
+        <div class="hs"><b>26</b><span>state features</span></div>
+        <div class="hs-div"></div>
+        <div class="hs"><b>4</b><span>reward signals</span></div>
+      </div>
     </div>
-    <div class="panel">
-      <div class="panel-title">Network Topology <span class="tip" title="Blue=Path A, Purple=Path B, Orange=Path C">?</span></div>
-      <svg id="topo-svg" class="chart-svg" style="height:240px"></svg>
-    </div>
-  </div>
+  </section>
 
-  <div class="fade-in fade-in-3">
-    <div class="panel-title" style="padding:0 0 12px 0">Quick Navigation</div>
-    <div class="quick-links">
-      <a href="comparison.html" class="qlink">
-        <span class="qlink-icon"><i data-feather="activity"></i></span>
-        <span class="qlink-text">DQN vs Baseline — Full comparison with 6 KPIs</span>
-      </a>
-      <a href="network.html" class="qlink">
-        <span class="qlink-icon"><i data-feather="share-2"></i></span>
-        <span class="qlink-text">Network Monitor — Live topology, utilization, flows</span>
-      </a>
-      <a href="training.html" class="qlink">
-        <span class="qlink-icon"><i data-feather="trending-up"></i></span>
-        <span class="qlink-text">Training Analytics — Loss curves, epsilon, history</span>
-      </a>
-      <a href="system.html" class="qlink">
-        <span class="qlink-icon"><i data-feather="cpu"></i></span>
-        <span class="qlink-text">System Info — Architecture, hyperparameters, features</span>
-      </a>
+  <!-- ── What it does ─────────────────────────────────────────────────── -->
+  <section class="land-section">
+    <div class="land-head fade-in">
+      <h2 class="land-h2">What it does</h2>
+      <p class="land-lead">Four pieces working together — an agent, a network, a brain to compare against, and a window to watch it all.</p>
     </div>
-  </div>
+    <div class="feature-grid">
+      <div class="feature-card fade-in fade-in-1">
+        <div class="fc-icon fc-indigo"><i data-feather="cpu"></i></div>
+        <h3>Deep RL Agent</h3>
+        <p>A Dueling LSTM-DQN with Double-Q learning, a replay buffer and ε-greedy exploration. It reads a 26-feature view of the network and picks one of six routing paths to maximise a shaped reward.</p>
+      </div>
+      <div class="feature-card fade-in fade-in-2">
+        <div class="fc-icon fc-blue"><i data-feather="share-2"></i></div>
+        <h3>Real SDN Fabric</h3>
+        <p>A Ryu OpenFlow controller installs flow rules on Open vSwitch switches inside Mininet — a 3-cluster, 7-switch IoT topology carrying sensor, video, bulk and emergency traffic.</p>
+      </div>
+      <div class="feature-card fade-in fade-in-3">
+        <div class="fc-icon fc-green"><i data-feather="activity"></i></div>
+        <h3>Baseline Showdown</h3>
+        <p>Every decision runs a shadow classical policy — shortest-path, ECMP, round-robin, least-utilised — so you can see exactly where, and by how much, the AI wins on each metric.</p>
+      </div>
+      <div class="feature-card fade-in fade-in-4">
+        <div class="fc-icon fc-pink"><i data-feather="play-circle"></i></div>
+        <h3>Simulation Lab</h3>
+        <p>Pick a topology and a scenario, then watch the real model route live traffic and train as you go. Every animated packet is the routing decision the data is actually made of.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── How it thinks ────────────────────────────────────────────────── -->
+  <section class="land-section">
+    <div class="land-head fade-in">
+      <h2 class="land-h2">How the agent thinks</h2>
+      <p class="land-lead">Each cycle turns raw switch counters into a decision — and learns from what happens next.</p>
+    </div>
+    <div class="pipeline fade-in fade-in-1">
+      <div class="pipe-step"><div class="ps-num">1</div><div class="ps-ico"><i data-feather="eye"></i></div><h4>Observe</h4><p>Link utilisation, flow counts, loss, jitter &amp; priority become a 26-feature state vector.</p></div>
+      <div class="pipe-arrow"><i data-feather="chevron-right"></i></div>
+      <div class="pipe-step"><div class="ps-num">2</div><div class="ps-ico"><i data-feather="cpu"></i></div><h4>Decide</h4><p>The LSTM-DQN scores every path and selects the action with the highest expected reward.</p></div>
+      <div class="pipe-arrow"><i data-feather="chevron-right"></i></div>
+      <div class="pipe-step"><div class="ps-num">3</div><div class="ps-ico"><i data-feather="git-branch"></i></div><h4>Route</h4><p>The controller pushes OpenFlow rules so the chosen path carries the flow end-to-end.</p></div>
+      <div class="pipe-arrow"><i data-feather="chevron-right"></i></div>
+      <div class="pipe-step"><div class="ps-num">4</div><div class="ps-ico"><i data-feather="award"></i></div><h4>Reward</h4><p>Latency, reliability, throughput &amp; fairness combine into one shaped reward signal.</p></div>
+      <div class="pipe-arrow"><i data-feather="chevron-right"></i></div>
+      <div class="pipe-step"><div class="ps-num">5</div><div class="ps-ico"><i data-feather="trending-up"></i></div><h4>Learn</h4><p>A gradient step nudges the network; ε decays and the policy sharpens over time.</p></div>
+    </div>
+  </section>
+
+  <!-- ── Under the hood ───────────────────────────────────────────────── -->
+  <section class="land-section">
+    <div class="land-head fade-in">
+      <h2 class="land-h2">Under the hood</h2>
+      <p class="land-lead">A faithful research stack — real packets, real OpenFlow, a real neural network.</p>
+    </div>
+    <div class="spec-grid fade-in fade-in-1">
+      <div class="spec"><b>Dueling LSTM-DQN</b><span>128-unit, 2-layer recurrent Q-network with separate value &amp; advantage heads</span></div>
+      <div class="spec"><b>Double-DQN + Replay</b><span>Stable targets and a 10k-experience buffer for sample-efficient learning</span></div>
+      <div class="spec"><b>6 routing actions</b><span>Path A–E across dual core &amp; aggregation switches, plus drop</span></div>
+      <div class="spec"><b>4-part reward</b><span>0.4·latency + 0.3·reliability + 0.2·throughput + 0.1·fairness</span></div>
+      <div class="spec"><b>Priority-aware</b><span>Emergency &amp; actuator flows are never dropped and take the fast lane</span></div>
+      <div class="spec"><b>Live &amp; reproducible</b><span>SSE-streamed metrics, seeded simulation, persistent weights</span></div>
+    </div>
+    <div class="stack-row fade-in fade-in-2">
+      <span class="stack-badge">PyTorch</span>
+      <span class="stack-badge">Ryu OpenFlow</span>
+      <span class="stack-badge">Mininet</span>
+      <span class="stack-badge">Open vSwitch</span>
+      <span class="stack-badge">Flask</span>
+      <span class="stack-badge">D3.js</span>
+    </div>
+  </section>
+
+  <!-- ── Final CTA ────────────────────────────────────────────────────── -->
+  <section class="land-final fade-in">
+    <h2>See the AI route — and train — in real time</h2>
+    <p>Open the Simulation Lab, choose a scenario, and watch the network adapt before your eyes.</p>
+    <div class="hero-land-cta" style="justify-content:center">
+      <a class="btn-land primary" href="simulation.html"><i data-feather="play-circle"></i> Launch Simulation Lab</a>
+      <a class="btn-land" href="overview.html"><i data-feather="grid"></i> Open Dashboard</a>
+    </div>
+  </section>
+
+  <footer class="land-footer">
+    AI-Driven SDN Traffic Controller · Dueling LSTM-DQN over an OpenFlow network ·
+    built with PyTorch, Ryu &amp; Mininet
+  </footer>
 </main>
 
 <script src="shared.js"></script>
 <script>
-let topoData=null;
-fetch(`${API}/api/topology`).then(r=>r.json()).then(t=>{topoData=t;drawTopo(t);}).catch(()=>{});
-
-initPage('overview', function(d) {
-  const eps=Number(d.epsilon), el=document.getElementById('v-eps');
-  el.textContent=fmt(eps,4); el.style.color=eps<.15?'var(--green)':eps<.5?'var(--yellow)':'var(--text-muted)';
-  setTxt('v-steps',fmtInt(d.learn_steps));
-  setTxt('v-loss',d.last_loss!=null?fmt(d.last_loss,5):'—');
-  const cmp=d.comparison||{};
-  setTxt('v-dqn',fmt(cmp.dqn_reward??d.total_reward,1));
-  setTxt('v-base',fmt(cmp.baseline_reward,1));
-  const w=(cmp.winner||'tie').toUpperCase(),wEl=document.getElementById('v-winner');
-  wEl.textContent=w; wEl.style.color=w==='DQN'?'var(--green)':w==='BASELINE'?'var(--red)':'var(--text-muted)';
-  const delta=Number(cmp.reward_delta??0);
-  setTxt('v-delta-sub',`Δ ${delta>=0?'+':''}${fmt(delta,1)}`);
-  drawRewardChart(d.compare_history||[]);
-  if(topoData)drawTopo(topoData);
-});
-
-function drawTopo(topo) {
-  const svg=d3.select('#topo-svg'),W=svg.node().clientWidth||340,H=240;
-  svg.attr('viewBox',`0 0 ${W} ${H}`).selectAll('*').remove();
-  const pos={h_sensor1:[W*.07,H*.06],h_sensor2:[W*.07,H*.24],h_camera1:[W*.07,H*.42],h_emerg:[W*.07,H*.60],
-    h_sensor3:[W*.93,H*.06],h_sensor4:[W*.93,H*.24],h_camera2:[W*.93,H*.42],h_actuator:[W*.93,H*.60],
-    s1:[W*.22,H*.33],s2:[W*.78,H*.33],s3:[W*.37,H*.58],s4:[W*.63,H*.58],s5:[W*.50,H*.78],
-    h_server1:[W*.37,H*.95],h_server2:[W*.63,H*.95]};
-  const pc={A:'var(--pathA)',B:'var(--pathB)',C:'var(--pathC)'},
-    nc={sensor:'var(--green)',camera:'var(--yellow)',emergency:'var(--red)',actuator:'var(--red)',server:'var(--pathA)',switch:'var(--accent)'};
-  topo.links.forEach(d=>{const[x1,y1]=pos[d.source]||[0,0],[x2,y2]=pos[d.target]||[0,0];
-    svg.append('line').attr('x1',x1).attr('y1',y1).attr('x2',x2).attr('y2',y2)
-      .attr('stroke',pc[d.path]||'var(--border)').attr('stroke-width',d.path?2:1).attr('opacity',d.path?.7:.35);
-    if(d.path)svg.append('text').attr('x',(x1+x2)/2).attr('y',(y1+y2)/2-4).attr('text-anchor','middle').attr('font-size',8).attr('fill',pc[d.path]).text(`P${d.path}`);});
-  topo.nodes.forEach(n=>{const[cx,cy]=pos[n.id]||[0,0],r=n.type==='switch'?12:7;
-    svg.append('circle').attr('cx',cx).attr('cy',cy).attr('r',r).attr('fill',nc[n.type]||'#888').attr('stroke','var(--border)').attr('stroke-width',1.5);
-    svg.append('text').attr('x',cx).attr('y',n.type==='switch'?cy+4:cy-11).attr('text-anchor','middle').attr('font-size',8)
-      .attr('fill',n.type==='switch'?'white':'var(--text-muted)').attr('font-weight',n.type==='switch'?700:400).text(n.type==='switch'?n.id:n.id.replace('h_',''));});
-}
-
-function drawRewardChart(h) {
-  const svg=clearSvg('#reward-svg'), dims=chartDimensions(svg,{r:60}), {W,H,M}=dims;
-  if(!h||h.length<2){svg.append('text').attr('x',W/2).attr('y',H/2).attr('text-anchor','middle').attr('fill','var(--text-muted)').attr('font-size',12).text('Waiting for data…');return;}
-  const x=d3.scaleLinear().domain([0,h.length-1]).range([M.l,W-M.r]);
-  const all=h.flatMap(d=>[d.dqn_reward??0,d.baseline_reward??0]),p=(d3.max(all)-d3.min(all))*.08||2;
-  const y=d3.scaleLinear().domain([d3.min(all)-p,d3.max(all)+p]).nice().range([H-M.b,M.t]);
-  drawGridLines(svg,y,dims); drawAxes(svg,x,y,dims,{yFmt:d3.format('.0f')});
-  const last=h[h.length-1],ahead=(last?.dqn_reward??0)>=(last?.baseline_reward??0);
-  svg.append('path').datum(h).attr('fill',ahead?'var(--green)':'var(--red)').attr('opacity',.1)
-    .attr('d',d3.area().x((_,i)=>x(i)).y0(d=>y(d.baseline_reward??0)).y1(d=>y(d.dqn_reward??0)).curve(d3.curveBasis));
-  svg.append('path').datum(h).attr('fill','none').attr('stroke','var(--pathB)').attr('stroke-width',2).attr('stroke-dasharray','5,3')
-    .attr('d',d3.line().x((_,i)=>x(i)).y(d=>y(d.baseline_reward??0)).curve(d3.curveBasis));
-  svg.append('path').datum(h).attr('fill','none').attr('stroke','var(--green)').attr('stroke-width',2.5)
-    .attr('d',d3.line().x((_,i)=>x(i)).y(d=>y(d.dqn_reward??0)).curve(d3.curveBasis));
-  const lx=x(h.length-1),gap=(last?.dqn_reward??0)-(last?.baseline_reward??0),lx2=W-M.r+8;
-  svg.append('circle').attr('cx',lx).attr('cy',y(last?.dqn_reward??0)).attr('r',4).attr('fill','var(--green)');
-  svg.append('text').attr('x',lx2).attr('y',M.t+10).attr('fill','var(--green)').attr('font-size',10).attr('font-weight',600).text('DQN');
-  svg.append('text').attr('x',lx2).attr('y',M.t+26).attr('fill','var(--pathB)').attr('font-size',10).text('Baseline');
-  svg.append('text').attr('x',lx2).attr('y',M.t+46).attr('font-size',11).attr('font-weight',700)
-    .attr('fill',gap>=0?'var(--green)':'var(--red)').text(`Δ ${gap>=0?'+':''}${gap.toFixed(1)}`);
-}
+  injectNav('home');
+  initTheme();
+  initIcons();
 </script>
 </body>
 </html>

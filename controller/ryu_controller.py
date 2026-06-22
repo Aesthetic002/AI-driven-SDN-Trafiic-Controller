@@ -29,24 +29,35 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from constants import (
     # Dims / hyper
     STATE_DIM, SEQUENCE_LEN, STATS_INTERVAL,
-    # Port assignments
+    # Port assignments — S1, S2
     S1_PORT_SENSOR1, S1_PORT_SENSOR2, S1_PORT_CAMERA1, S1_PORT_EMERGENCY,
     S1_PORT_CORE_A, S1_PORT_CORE_B,
     S2_PORT_SENSOR3, S2_PORT_SENSOR4, S2_PORT_CAMERA2, S2_PORT_ACTUATOR,
     S2_PORT_CORE_A, S2_PORT_CORE_B,
+    # Port assignments — S3, S4, S5
     S3_PORT_FROM_S1, S3_PORT_FROM_S2, S3_PORT_TO_S5, S3_PORT_CROSSLINK,
+    S3_PORT_FROM_S6, S3_PORT_TO_S7,
     S4_PORT_FROM_S1, S4_PORT_FROM_S2, S4_PORT_TO_S5, S4_PORT_CROSSLINK,
+    S4_PORT_FROM_S6, S4_PORT_TO_S7,
     S5_PORT_FROM_S3, S5_PORT_FROM_S4, S5_PORT_SERVER1, S5_PORT_SERVER2,
-    # Host IPs
+    # Port assignments — S6, S7 (new)
+    S6_PORT_SENSOR5, S6_PORT_SENSOR6, S6_PORT_CAMERA3, S6_PORT_GATEWAY,
+    S6_PORT_CORE_A, S6_PORT_CORE_B,
+    S7_PORT_FROM_S3, S7_PORT_FROM_S4, S7_PORT_SERVER3, S7_PORT_SERVER4,
+    # Host IPs — clusters A, B
     IP_SENSOR1, IP_SENSOR2, IP_CAMERA1, IP_EMERG,
     IP_SENSOR3, IP_SENSOR4, IP_CAMERA2, IP_ACTUATOR,
     IP_SERVER1, IP_SERVER2,
-    CLUSTER_A_IPS, CLUSTER_B_IPS, EMERGENCY_IPS, ACTUATOR_IPS,
+    # Host IPs — cluster C and secondary servers (new)
+    IP_SENSOR5, IP_SENSOR6, IP_CAMERA3, IP_GATEWAY,
+    IP_SERVER3, IP_SERVER4,
+    CLUSTER_A_IPS, CLUSTER_B_IPS, CLUSTER_C_IPS, EMERGENCY_IPS, ACTUATOR_IPS,
     # Traffic classification
     SENSOR_PORT, VIDEO_PORT, ELEPHANT_PORT, ACTUATOR_PORT,
     DSCP_EMERGENCY,
     # Actions
-    ACTION_PATH_A, ACTION_PATH_B, ACTION_PATH_C, ACTION_DROP, ACTION_NAMES,
+    ACTION_PATH_A, ACTION_PATH_B, ACTION_PATH_C,
+    ACTION_PATH_D, ACTION_PATH_E, ACTION_DROP, ACTION_NAMES,
     # Comparison mode
     ROUTING_MODE_DQN, ROUTING_MODE_BASELINE, BASELINE_POLICY_DEFAULT,
 )
@@ -64,11 +75,12 @@ import api.shared_state as shared_state
 WEIGHTS_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "model_weights.pth")
 SAVE_EVERY   = 200      # save weights every N learning steps
 
-# Datapath IDs — Mininet assigns 1-5 for s1-s5
+# Datapath IDs — Mininet assigns 1-7 for s1-s7
 DPID_S1, DPID_S2, DPID_S3, DPID_S4, DPID_S5 = 1, 2, 3, 4, 5
+DPID_S6, DPID_S7 = 6, 7
 
-SERVER_IPS = {IP_SERVER1, IP_SERVER2}
-IOT_IPS    = CLUSTER_A_IPS | CLUSTER_B_IPS
+SERVER_IPS = {IP_SERVER1, IP_SERVER2, IP_SERVER3, IP_SERVER4}
+IOT_IPS    = CLUSTER_A_IPS | CLUSTER_B_IPS | CLUSTER_C_IPS
 
 # Flow timeouts (seconds)
 FLOW_IDLE = 10
@@ -82,14 +94,21 @@ PRIO_EMERGENCY  = 200
 
 # Host IP → (access_switch_dpid, host_port_on_switch)
 HOST_PORT = {
+    # Cluster A (→ S1)
     IP_SENSOR1:  (DPID_S1, S1_PORT_SENSOR1),
     IP_SENSOR2:  (DPID_S1, S1_PORT_SENSOR2),
     IP_CAMERA1:  (DPID_S1, S1_PORT_CAMERA1),
     IP_EMERG:    (DPID_S1, S1_PORT_EMERGENCY),
+    # Cluster B (→ S2)
     IP_SENSOR3:  (DPID_S2, S2_PORT_SENSOR3),
     IP_SENSOR4:  (DPID_S2, S2_PORT_SENSOR4),
     IP_CAMERA2:  (DPID_S2, S2_PORT_CAMERA2),
     IP_ACTUATOR: (DPID_S2, S2_PORT_ACTUATOR),
+    # Cluster C (→ S6)
+    IP_SENSOR5:  (DPID_S6, S6_PORT_SENSOR5),
+    IP_SENSOR6:  (DPID_S6, S6_PORT_SENSOR6),
+    IP_CAMERA3:  (DPID_S6, S6_PORT_CAMERA3),
+    IP_GATEWAY:  (DPID_S6, S6_PORT_GATEWAY),
 }
 
 # ── Flow tracking ─────────────────────────────────────────────────────────────
@@ -136,10 +155,12 @@ class IoTController(app_manager.RyuApp):
 
         # Count of active flows per action/path (actual policy + comparison policy).
         self.dqn_path_counts: dict[int, int] = {
-            ACTION_PATH_A: 0, ACTION_PATH_B: 0, ACTION_PATH_C: 0, ACTION_DROP: 0,
+            ACTION_PATH_A: 0, ACTION_PATH_B: 0, ACTION_PATH_C: 0,
+            ACTION_PATH_D: 0, ACTION_PATH_E: 0, ACTION_DROP: 0,
         }
         self.baseline_path_counts: dict[int, int] = {
-            ACTION_PATH_A: 0, ACTION_PATH_B: 0, ACTION_PATH_C: 0, ACTION_DROP: 0,
+            ACTION_PATH_A: 0, ACTION_PATH_B: 0, ACTION_PATH_C: 0,
+            ACTION_PATH_D: 0, ACTION_PATH_E: 0, ACTION_DROP: 0,
         }
         self.path_counts = (
             self.dqn_path_counts if self.routing_mode == ROUTING_MODE_DQN else self.baseline_path_counts
@@ -199,6 +220,8 @@ class IoTController(app_manager.RyuApp):
         self._install_table_miss(dp)
         if dp.id == DPID_S5:
             self._install_s5_static(dp)
+        if dp.id == DPID_S7:
+            self._install_s7_static(dp)
 
     # ── OpenFlow event: unknown packet arrives ────────────────────────────────
 
@@ -305,11 +328,13 @@ class IoTController(app_manager.RyuApp):
                 hub.sleep(STATS_INTERVAL)
                 continue
 
-            # Inject live path counts into the state vector (features 7-9)
+            # Inject live path counts into the state vector (features 7-9, 24-25)
             new_state = list(new_state)
             new_state[7]  = min(self.path_counts.get(ACTION_PATH_A, 0) / 20.0, 1.0)
             new_state[8]  = min(self.path_counts.get(ACTION_PATH_B, 0) / 20.0, 1.0)
             new_state[9]  = min(self.path_counts.get(ACTION_PATH_C, 0) / 20.0, 1.0)
+            new_state[24] = min(self.path_counts.get(ACTION_PATH_D, 0) / 20.0, 1.0)
+            new_state[25] = min(self.path_counts.get(ACTION_PATH_E, 0) / 20.0, 1.0)
 
             # Priority flag: any high-priority flow currently active
             new_state[18] = 1.0 if any(
@@ -397,16 +422,26 @@ class IoTController(app_manager.RyuApp):
         """Install FlowMod rules on every hop for the chosen path."""
         prio = PRIO_EMERGENCY if is_priority else PRIO_FLOW
         src_cluster_a = src_ip in CLUSTER_A_IPS
+        src_cluster_c = src_ip in CLUSTER_C_IPS
 
-        # ── Access switch (S1 or S2) ──────────────────────────────────────────
-        access_dpid = DPID_S1 if src_cluster_a else DPID_S2
-        core_port   = (
-            (S1_PORT_CORE_A if src_cluster_a else S2_PORT_CORE_A)
-            if action in (ACTION_PATH_A, ACTION_PATH_C)
-            else
-            (S1_PORT_CORE_B if src_cluster_a else S2_PORT_CORE_B)
-        )
-        self._flow_mod(access_dpid, src_ip, dst_ip, core_port, prio)
+        # ── Access switch (S1, S2, or S6) ────────────────────────────────────
+        if src_cluster_c:
+            # Cluster C traffic via S6
+            core_port = (
+                S6_PORT_CORE_A
+                if action in (ACTION_PATH_A, ACTION_PATH_C, ACTION_PATH_D)
+                else S6_PORT_CORE_B
+            )
+            self._flow_mod(DPID_S6, src_ip, dst_ip, core_port, prio)
+        else:
+            access_dpid = DPID_S1 if src_cluster_a else DPID_S2
+            core_port   = (
+                (S1_PORT_CORE_A if src_cluster_a else S2_PORT_CORE_A)
+                if action in (ACTION_PATH_A, ACTION_PATH_C, ACTION_PATH_D)
+                else
+                (S1_PORT_CORE_B if src_cluster_a else S2_PORT_CORE_B)
+            )
+            self._flow_mod(access_dpid, src_ip, dst_ip, core_port, prio)
 
         # ── Core switch ───────────────────────────────────────────────────────
         if action == ACTION_PATH_A:
@@ -422,23 +457,46 @@ class IoTController(app_manager.RyuApp):
             self._flow_mod(DPID_S3, src_ip, dst_ip, S3_PORT_CROSSLINK, prio)
             self._flow_mod(DPID_S4, src_ip, dst_ip, S4_PORT_TO_S5,    prio)
 
+        elif action == ACTION_PATH_D:
+            # S3 → S7 (secondary aggregation)
+            self._flow_mod(DPID_S3, src_ip, dst_ip, S3_PORT_TO_S7, prio)
+
+        elif action == ACTION_PATH_E:
+            # S4 → S7 (secondary high-BW)
+            self._flow_mod(DPID_S4, src_ip, dst_ip, S4_PORT_TO_S7, prio)
+
     def _install_return_rules(self, server_ip: str, iot_ip: str):
         """Install return-path rules (server → IoT) via S3 always."""
-        if not self._dp(DPID_S5):
-            return
-
         dst_dpid, dst_host_port = HOST_PORT.get(iot_ip, (None, None))
         if dst_dpid is None:
             return
 
-        # S5 → S3
-        self._flow_mod(DPID_S5, server_ip, iot_ip, S5_PORT_FROM_S3, PRIO_STATIC)
+        if server_ip in {IP_SERVER3, IP_SERVER4}:
+            # Return via S7 → S3 → access switch
+            if not self._dp(DPID_S7):
+                return
+            self._flow_mod(DPID_S7, server_ip, iot_ip, S7_PORT_FROM_S3, PRIO_STATIC)
+            if dst_dpid == DPID_S6:
+                s3_out = S3_PORT_FROM_S6
+            elif dst_dpid == DPID_S1:
+                s3_out = S3_PORT_FROM_S1
+            else:
+                s3_out = S3_PORT_FROM_S2
+            self._flow_mod(DPID_S3, server_ip, iot_ip, s3_out, PRIO_STATIC)
+        else:
+            # Return via S5 → S3 → access switch
+            if not self._dp(DPID_S5):
+                return
+            self._flow_mod(DPID_S5, server_ip, iot_ip, S5_PORT_FROM_S3, PRIO_STATIC)
+            if dst_dpid == DPID_S6:
+                s3_out = S3_PORT_FROM_S6
+            elif dst_dpid == DPID_S1:
+                s3_out = S3_PORT_FROM_S1
+            else:
+                s3_out = S3_PORT_FROM_S2
+            self._flow_mod(DPID_S3, server_ip, iot_ip, s3_out, PRIO_STATIC)
 
-        # S3 → S1 or S2
-        s3_out = S3_PORT_FROM_S1 if dst_dpid == DPID_S1 else S3_PORT_FROM_S2
-        self._flow_mod(DPID_S3, server_ip, iot_ip, s3_out, PRIO_STATIC)
-
-        # S1/S2 → host
+        # Access switch → host (same for both paths)
         self._flow_mod(dst_dpid, server_ip, iot_ip, dst_host_port, PRIO_STATIC)
 
     def _install_drop(self, dp, src_ip: str, dst_ip: str):
@@ -454,6 +512,14 @@ class IoTController(app_manager.RyuApp):
         """Static server-distribution rules on S5 (installed once on connect)."""
         parser = dp.ofproto_parser
         for ip, port in [(IP_SERVER1, S5_PORT_SERVER1), (IP_SERVER2, S5_PORT_SERVER2)]:
+            match   = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP, ipv4_dst=ip)
+            actions = [parser.OFPActionOutput(port)]
+            self._add_flow(dp, PRIO_STATIC, match, actions)
+
+    def _install_s7_static(self, dp):
+        """Static server-distribution rules on S7 (installed once on connect)."""
+        parser = dp.ofproto_parser
+        for ip, port in [(IP_SERVER3, S7_PORT_SERVER3), (IP_SERVER4, S7_PORT_SERVER4)]:
             match   = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP, ipv4_dst=ip)
             actions = [parser.OFPActionOutput(port)]
             self._add_flow(dp, PRIO_STATIC, match, actions)
@@ -558,10 +624,12 @@ class IoTController(app_manager.RyuApp):
             "last_loss":     loss,
             "episode_count": self.agent.episode_count,
             "path_counts": {
-                "PATH_A": self.path_counts.get(0, 0),
-                "PATH_B": self.path_counts.get(1, 0),
-                "PATH_C": self.path_counts.get(2, 0),
-                "DROP":   self.path_counts.get(3, 0),
+                "PATH_A": self.path_counts.get(ACTION_PATH_A, 0),
+                "PATH_B": self.path_counts.get(ACTION_PATH_B, 0),
+                "PATH_C": self.path_counts.get(ACTION_PATH_C, 0),
+                "PATH_D": self.path_counts.get(ACTION_PATH_D, 0),
+                "PATH_E": self.path_counts.get(ACTION_PATH_E, 0),
+                "DROP":   self.path_counts.get(ACTION_DROP,   0),
             },
             "active_flows":   flows,
             "flow_decisions": self._build_flow_decisions(),
@@ -656,7 +724,9 @@ class IoTController(app_manager.RyuApp):
             "PATH_A": counts.get(ACTION_PATH_A, 0),
             "PATH_B": counts.get(ACTION_PATH_B, 0),
             "PATH_C": counts.get(ACTION_PATH_C, 0),
-            "DROP": counts.get(ACTION_DROP, 0),
+            "PATH_D": counts.get(ACTION_PATH_D, 0),
+            "PATH_E": counts.get(ACTION_PATH_E, 0),
+            "DROP":   counts.get(ACTION_DROP,   0),
         }
 
     @staticmethod

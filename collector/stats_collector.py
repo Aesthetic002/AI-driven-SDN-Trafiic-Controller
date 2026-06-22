@@ -41,30 +41,42 @@ try:
         S1_PORT_CORE_A, S1_PORT_CORE_B,
         # S2 uplink ports
         S2_PORT_CORE_A, S2_PORT_CORE_B,
-        # S3/S4/S5 ports
+        # S3/S4/S5 ports (existing)
         S3_PORT_FROM_S1, S3_PORT_FROM_S2, S3_PORT_TO_S5, S3_PORT_CROSSLINK,
         S4_PORT_FROM_S1, S4_PORT_FROM_S2, S4_PORT_TO_S5, S4_PORT_CROSSLINK,
         S5_PORT_FROM_S3, S5_PORT_FROM_S4,
+        # S6/S7 ports (new)
+        S6_PORT_CORE_A, S6_PORT_CORE_B,
+        S3_PORT_FROM_S6, S3_PORT_TO_S7,
+        S4_PORT_FROM_S6, S4_PORT_TO_S7,
+        S7_PORT_FROM_S3, S7_PORT_FROM_S4,
         # Link capacities for normalisation
         LINK_BW_ACCESS_CORE, LINK_BW_CORE_SERVER_A,
-        LINK_BW_CORE_SERVER_B, LINK_BW_CROSSLINK,
+        LINK_BW_CORE_SERVER_B, LINK_BW_CORE_SERVER_C, LINK_BW_CORE_SERVER_D,
+        LINK_BW_CROSSLINK,
         # DQN actions (to classify flows by output port)
-        ACTION_PATH_A, ACTION_PATH_B, ACTION_PATH_C,
+        ACTION_PATH_A, ACTION_PATH_B, ACTION_PATH_C, ACTION_PATH_D, ACTION_PATH_E,
     )
 except ImportError:
-    SWITCHES = ["s1", "s2", "s3", "s4", "s5"]
-    STATS_INTERVAL = 2.0; STATE_DIM = 20
+    SWITCHES = ["s1", "s2", "s3", "s4", "s5", "s6", "s7"]
+    STATS_INTERVAL = 2.0; STATE_DIM = 26
     FEATURE_NAMES = [f"feat_{i}" for i in range(STATE_DIM)]
     S1_PORT_CORE_A = 5; S1_PORT_CORE_B = 6
     S2_PORT_CORE_A = 5; S2_PORT_CORE_B = 6
+    S6_PORT_CORE_A = 5; S6_PORT_CORE_B = 6
     S3_PORT_FROM_S1 = 1; S3_PORT_FROM_S2 = 2
     S3_PORT_TO_S5 = 3;   S3_PORT_CROSSLINK = 4
+    S3_PORT_FROM_S6 = 5; S3_PORT_TO_S7 = 6
     S4_PORT_FROM_S1 = 1; S4_PORT_FROM_S2 = 2
     S4_PORT_TO_S5 = 3;   S4_PORT_CROSSLINK = 4
+    S4_PORT_FROM_S6 = 5; S4_PORT_TO_S7 = 6
     S5_PORT_FROM_S3 = 1; S5_PORT_FROM_S4 = 2
+    S7_PORT_FROM_S3 = 1; S7_PORT_FROM_S4 = 2
     LINK_BW_ACCESS_CORE = 20; LINK_BW_CORE_SERVER_A = 50
-    LINK_BW_CORE_SERVER_B = 100; LINK_BW_CROSSLINK = 50
+    LINK_BW_CORE_SERVER_B = 100; LINK_BW_CORE_SERVER_C = 75
+    LINK_BW_CORE_SERVER_D = 80;  LINK_BW_CROSSLINK = 50
     ACTION_PATH_A = 0; ACTION_PATH_B = 1; ACTION_PATH_C = 2
+    ACTION_PATH_D = 3; ACTION_PATH_E = 4
 
 
 # ── OvS helpers ───────────────────────────────────────────────────────────────
@@ -173,20 +185,18 @@ class StatsCollector:
         self._prev: dict[str, PortStats] = {}
         self._prev_time: float = 0.0
         self._prev_avg_util: float = 0.0
-        self._jitter_hist: dict[str, list[float]] = {"A": [], "B": [], "C": []}
+        self._jitter_hist: dict[str, list[float]] = {"A": [], "B": [], "C": [], "D": [], "E": []}
 
     # ── Public ────────────────────────────────────────────────────────────────
 
     def get_state(self) -> list[float]:
-        """Poll OvS and return the 20-float state vector."""
+        """Poll OvS and return the 26-float state vector."""
         now = time.time()
         dt  = max(now - self._prev_time, 1e-3)
 
         port_stats: dict[str, PortStats] = {
             sw: parse_port_stats(_dump_ports(sw)) for sw in SWITCHES
         }
-        # Flows inspected on s3 (Path A/C) and s4 (Path B) since they carry
-        # all inter-cluster traffic after the Ryu controller installs FlowMods.
         flows_s3 = parse_flow_stats(_dump_flows("s3"))
         flows_s4 = parse_flow_stats(_dump_flows("s4"))
 
@@ -214,38 +224,33 @@ class StatsCollector:
         s2 = ports.get("s2", {}); ps2 = self._prev.get("s2", {})
         s3 = ports.get("s3", {}); ps3 = self._prev.get("s3", {})
         s4 = ports.get("s4", {}); ps4 = self._prev.get("s4", {})
+        s6 = ports.get("s6", {}); ps6 = self._prev.get("s6", {})
 
-        # ── Features 0-6: link utilizations ──────────────────────────────────
-        # Access → core uplinks (20 Mbps each)
-        util_s1_s3 = _clamp(_port_mbps(s1, ps1, S1_PORT_CORE_A, dt) / LINK_BW_ACCESS_CORE)
-        util_s1_s4 = _clamp(_port_mbps(s1, ps1, S1_PORT_CORE_B, dt) / LINK_BW_ACCESS_CORE)
-        util_s2_s3 = _clamp(_port_mbps(s2, ps2, S2_PORT_CORE_A, dt) / LINK_BW_ACCESS_CORE)
-        util_s2_s4 = _clamp(_port_mbps(s2, ps2, S2_PORT_CORE_B, dt) / LINK_BW_ACCESS_CORE)
-
-        # Core → server (asymmetric capacities)
+        # ── Features 0-6: link utilizations (existing) ───────────────────────
+        util_s1_s3 = _clamp(_port_mbps(s1, ps1, S1_PORT_CORE_A,    dt) / LINK_BW_ACCESS_CORE)
+        util_s1_s4 = _clamp(_port_mbps(s1, ps1, S1_PORT_CORE_B,    dt) / LINK_BW_ACCESS_CORE)
+        util_s2_s3 = _clamp(_port_mbps(s2, ps2, S2_PORT_CORE_A,    dt) / LINK_BW_ACCESS_CORE)
+        util_s2_s4 = _clamp(_port_mbps(s2, ps2, S2_PORT_CORE_B,    dt) / LINK_BW_ACCESS_CORE)
         util_s3_s5 = _clamp(_port_mbps(s3, ps3, S3_PORT_TO_S5,     dt) / LINK_BW_CORE_SERVER_A)
         util_s4_s5 = _clamp(_port_mbps(s4, ps4, S4_PORT_TO_S5,     dt) / LINK_BW_CORE_SERVER_B)
         util_xl    = _clamp(_port_mbps(s3, ps3, S3_PORT_CROSSLINK,  dt) / LINK_BW_CROSSLINK)
 
-        # ── Features 7-9: active flows per path ──────────────────────────────
-        # Path A: flows whose output port on S3 goes toward S5 (port 3)
-        # Path C: flows whose output port on S3 goes toward S4 (port 4, cross-link)
-        # Path B: flows on S4 whose output port goes toward S5 (port 3)
+        # ── Features 7-9: active flows per path (A/B/C) ──────────────────────
         flows_a = sum(1 for f in flows_s3 if f["out_port"] == S3_PORT_TO_S5)
         flows_c = sum(1 for f in flows_s3 if f["out_port"] == S3_PORT_CROSSLINK)
         flows_b = sum(1 for f in flows_s4 if f["out_port"] == S4_PORT_TO_S5)
 
-        # ── Features 10-11: packet loss per path ─────────────────────────────
+        # ── Features 10-11: packet loss ───────────────────────────────────────
         loss_a = _loss_rate(s3, S3_PORT_TO_S5)
         loss_b = _loss_rate(s4, S4_PORT_TO_S5)
 
-        # ── Features 12-13: jitter estimates ─────────────────────────────────
+        # ── Features 12-13: jitter ────────────────────────────────────────────
         jitter_a = self._jitter("A", util_s3_s5)
         jitter_b = self._jitter("B", util_s4_s5)
 
-        # ── Features 14-15: cumulative bytes per path (normalized) ───────────
-        bytes_a = _clamp(s3.get(S3_PORT_TO_S5,    {}).get("tx_bytes", 0) / 1e7)
-        bytes_b = _clamp(s4.get(S4_PORT_TO_S5,    {}).get("tx_bytes", 0) / 1e7)
+        # ── Features 14-15: cumulative bytes ─────────────────────────────────
+        bytes_a = _clamp(s3.get(S3_PORT_TO_S5, {}).get("tx_bytes", 0) / 1e7)
+        bytes_b = _clamp(s4.get(S4_PORT_TO_S5, {}).get("tx_bytes", 0) / 1e7)
 
         # ── Feature 16: time of day ───────────────────────────────────────────
         t   = datetime.fromtimestamp(now)
@@ -264,6 +269,18 @@ class StatsCollector:
 
         # ── Feature 19: congestion flag ───────────────────────────────────────
         congestion = 1.0 if any(u > 0.8 for u in all_utils) else 0.0
+
+        # ── Features 20-21: Cluster C uplink utilizations (new) ──────────────
+        util_s6_s3 = _clamp(_port_mbps(s6, ps6, S6_PORT_CORE_A, dt) / LINK_BW_ACCESS_CORE)
+        util_s6_s4 = _clamp(_port_mbps(s6, ps6, S6_PORT_CORE_B, dt) / LINK_BW_ACCESS_CORE)
+
+        # ── Features 22-23: S3/S4 → S7 secondary aggregation links (new) ─────
+        util_s3_s7 = _clamp(_port_mbps(s3, ps3, S3_PORT_TO_S7, dt) / LINK_BW_CORE_SERVER_C)
+        util_s4_s7 = _clamp(_port_mbps(s4, ps4, S4_PORT_TO_S7, dt) / LINK_BW_CORE_SERVER_D)
+
+        # ── Features 24-25: active flows on secondary paths (new) ─────────────
+        flows_d = sum(1 for f in flows_s3 if f["out_port"] == S3_PORT_TO_S7)
+        flows_e = sum(1 for f in flows_s4 if f["out_port"] == S4_PORT_TO_S7)
 
         return [
             util_s1_s3,             # 0
@@ -286,6 +303,12 @@ class StatsCollector:
             trend,                  # 17
             priority_flag,          # 18
             congestion,             # 19
+            util_s6_s3,             # 20
+            util_s6_s4,             # 21
+            util_s3_s7,             # 22
+            util_s4_s7,             # 23
+            _clamp(flows_d / 20.0), # 24
+            _clamp(flows_e / 20.0), # 25
         ]
 
     def _jitter(self, path: str, util: float) -> float:
@@ -323,34 +346,43 @@ def _loss_rate(ports: PortStats, port: int) -> float:
 # ── Mock mode ─────────────────────────────────────────────────────────────────
 
 def _mock_state() -> list[float]:
-    """Synthetic plausible state — no OvS connection needed."""
+    """Synthetic plausible state — no OvS connection needed. Returns 26 features."""
     import random
     t   = datetime.now()
     tod = (t.hour * 3600 + t.minute * 60 + t.second) / 86400.0
-    ua  = random.uniform(0.1, 0.9)   # S3 path (Path A) — simulate congestion spikes
-    ub  = random.uniform(0.05, 0.6)  # S4 path (Path B)
+    ua  = random.uniform(0.1, 0.9)   # S3 primary path
+    ub  = random.uniform(0.05, 0.6)  # S4 primary path
     uxl = random.uniform(0.0, 0.2)   # cross-link — usually idle
+    uc  = random.uniform(0.05, 0.5)  # Cluster C access
+    ud  = random.uniform(0.0, 0.4)   # S3→S7 secondary
+    ue  = random.uniform(0.0, 0.3)   # S4→S7 secondary
     return [
-        ua * 0.9,                        # 0  link_util_s1_s3
-        ub * 0.7,                        # 1  link_util_s1_s4
-        ua * 0.6,                        # 2  link_util_s2_s3
-        ub * 0.5,                        # 3  link_util_s2_s4
-        ua,                              # 4  link_util_s3_s5
-        ub,                              # 5  link_util_s4_s5
-        uxl,                             # 6  link_util_crosslink
-        random.uniform(0.0, 0.5),        # 7  active_flows_path_a
-        random.uniform(0.0, 0.4),        # 8  active_flows_path_b
-        random.uniform(0.0, 0.1),        # 9  active_flows_path_c (rare)
-        max(0.0, ua - 0.75) * 0.2,       # 10 packet_loss_path_a
-        0.0,                             # 11 packet_loss_path_b
-        random.uniform(0.0, 0.3),        # 12 jitter_path_a
-        random.uniform(0.0, 0.15),       # 13 jitter_path_b
-        random.uniform(0.0, 0.5),        # 14 bytes_path_a
-        random.uniform(0.0, 0.4),        # 15 bytes_path_b
-        tod,                             # 16 time_of_day
-        random.uniform(-0.1, 0.1),       # 17 util_trend
-        1.0 if ua > 0.7 else 0.0,        # 18 priority_flag
-        1.0 if ua > 0.8 or ub > 0.8 else 0.0,  # 19 congestion_flag
+        ua * 0.9,                             # 0  link_util_s1_s3
+        ub * 0.7,                             # 1  link_util_s1_s4
+        ua * 0.6,                             # 2  link_util_s2_s3
+        ub * 0.5,                             # 3  link_util_s2_s4
+        ua,                                   # 4  link_util_s3_s5
+        ub,                                   # 5  link_util_s4_s5
+        uxl,                                  # 6  link_util_crosslink
+        random.uniform(0.0, 0.5),             # 7  active_flows_path_a
+        random.uniform(0.0, 0.4),             # 8  active_flows_path_b
+        random.uniform(0.0, 0.1),             # 9  active_flows_path_c
+        max(0.0, ua - 0.75) * 0.2,            # 10 packet_loss_path_a
+        0.0,                                  # 11 packet_loss_path_b
+        random.uniform(0.0, 0.3),             # 12 jitter_path_a
+        random.uniform(0.0, 0.15),            # 13 jitter_path_b
+        random.uniform(0.0, 0.5),             # 14 bytes_path_a
+        random.uniform(0.0, 0.4),             # 15 bytes_path_b
+        tod,                                  # 16 time_of_day
+        random.uniform(-0.1, 0.1),            # 17 util_trend
+        1.0 if ua > 0.7 else 0.0,             # 18 priority_flag
+        1.0 if ua > 0.8 or ub > 0.8 else 0.0,# 19 congestion_flag
+        uc * 0.8,                             # 20 link_util_s6_s3
+        uc * 0.6,                             # 21 link_util_s6_s4
+        ud,                                   # 22 link_util_s3_s7
+        ue,                                   # 23 link_util_s4_s7
+        random.uniform(0.0, 0.3),             # 24 active_flows_path_d
+        random.uniform(0.0, 0.2),             # 25 active_flows_path_e
     ]
 
 

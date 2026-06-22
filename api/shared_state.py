@@ -13,8 +13,8 @@ _lock = threading.Lock()
 
 # ── Live state ────────────────────────────────────────────────────────────────
 _state = {
-    # Current 20-feature vector (list[float])
-    "current_state":    [0.0] * 20,
+    # Current 26-feature vector (list[float])
+    "current_state":    [0.0] * 26,
     "feature_names":    [],
 
     # DQN agent metrics
@@ -24,7 +24,8 @@ _state = {
     "last_loss":        None,
 
     # Path routing counters
-    "path_counts": {"PATH_A": 0, "PATH_B": 0, "PATH_C": 0, "DROP": 0},
+    "path_counts": {"PATH_A": 0, "PATH_B": 0, "PATH_C": 0,
+                    "PATH_D": 0, "PATH_E": 0, "DROP": 0},
 
     # Active flows  { "src->dst": {"action": int, "path": str, "age_s": float} }
     "active_flows":     {},
@@ -46,6 +47,7 @@ _state = {
 
     # Timestamps
     "last_update":      None,
+    "controller_t":     None,   # timestamp Ryu last wrote the state file
     "start_time":       time.time(),
 }
 
@@ -74,12 +76,15 @@ def push_agent(epsilon: float, learn_steps: int, total_reward: float,
 
 
 def push_path_counts(counts: dict[int, int]):
-    from constants import ACTION_PATH_A, ACTION_PATH_B, ACTION_PATH_C, ACTION_DROP
+    from constants import (ACTION_PATH_A, ACTION_PATH_B, ACTION_PATH_C,
+                           ACTION_PATH_D, ACTION_PATH_E, ACTION_DROP)
     with _lock:
         _state["path_counts"] = {
             "PATH_A": counts.get(ACTION_PATH_A, 0),
             "PATH_B": counts.get(ACTION_PATH_B, 0),
             "PATH_C": counts.get(ACTION_PATH_C, 0),
+            "PATH_D": counts.get(ACTION_PATH_D, 0),
+            "PATH_E": counts.get(ACTION_PATH_E, 0),
             "DROP":   counts.get(ACTION_DROP,   0),
         }
 
@@ -98,6 +103,11 @@ def push_flows(flow_table: dict):
         }
     with _lock:
         _state["active_flows"] = flows
+
+
+def push_controller_timestamp(t: float):
+    with _lock:
+        _state["controller_t"] = t
 
 
 def push_util(avg_util: float):
@@ -145,5 +155,6 @@ def snapshot() -> dict:
             "flow_decisions": list(_state["flow_decisions"]),
             "episode_count":  _state["episode_count"],
             "last_update":    _state["last_update"],
+            "controller_t":   _state["controller_t"],
             "uptime_s":       round(uptime, 1),
         }

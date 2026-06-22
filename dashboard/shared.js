@@ -6,13 +6,16 @@
 const API = 'http://127.0.0.1:5000';
 let _dataCallback   = null;
 let _es             = null;
+let _liveDataPage   = false;   // true only on pages that call initPage() (SSE-driven)
 let _lastDataTime   = 0;       // wall-clock ms of the last SSE message
 let _lastSnapshot   = null;    // most recent full snapshot
 const STALE_AFTER_MS = 6000;   // mark UI as stale after this gap
 
 /* ── Navigation ────────────────────────────────────────────────────────── */
 const NAV_PAGES = [
-  { id: 'overview',   href: 'index.html',      label: 'Overview',        icon: 'home' },
+  { id: 'home',       href: 'index.html',       label: 'Home',            icon: 'home' },
+  { id: 'overview',   href: 'overview.html',    label: 'Dashboard',       icon: 'grid' },
+  { id: 'simulation', href: 'simulation.html',  label: 'Simulation Lab',  icon: 'play-circle' },
   { id: 'comparison', href: 'comparison.html',  label: 'DQN vs Baseline', icon: 'activity' },
   { id: 'network',    href: 'network.html',     label: 'Network',         icon: 'share-2' },
   { id: 'training',   href: 'training.html',    label: 'Training',        icon: 'trending-up' },
@@ -29,10 +32,10 @@ function injectNav(activePage) {
   ).join('');
   el.className = 'nav';
   el.innerHTML = `
-    <div class="nav-logo">
+    <a class="nav-logo" href="index.html" style="text-decoration:none;color:inherit">
       <div class="logo-dot" id="status-dot"></div>
       <span>AI-SDN Dashboard</span>
-    </div>
+    </a>
     <div class="nav-links">${links}</div>
     <div class="nav-right">
       <span class="nav-info" id="nav-episode">Episode —</span>
@@ -72,17 +75,47 @@ const SNAP_CACHE_KEY = 'sdn-last-snapshot';
 function _applySnapshot(d, source='sse') {
   _lastDataTime = Date.now();
   _lastSnapshot = d;
-  setStale(false);
-  // Cache the snapshot so the next page navigation can render instantly
-  // instead of waiting for the new SSE connection to establish.
+
+  // controller_t is the timestamp Ryu last wrote the state file.
+  // If it's more than 8s old, the controller has stopped even if the
+  // file pump is still re-reading the same stale file every second.
+  // In --mock mode controller_t is null → treat as alive.
+  const ct = d.controller_t;
+  const controllerDead = ct != null && (Date.now() / 1000 - ct) > 8;
+  setStale(controllerDead);
+
   try { sessionStorage.setItem(SNAP_CACHE_KEY, JSON.stringify(d)); } catch(e) {}
-  const ep = document.getElementById('nav-episode'); if (ep && d.episode_count) ep.textContent = `Episode ${d.episode_count}`;
-  const ut = document.getElementById('nav-uptime');  if (ut && d.uptime_s != null) ut.textContent = `${Math.round(d.uptime_s)}s`;
+  const ep = document.getElementById('nav-episode');
+  if (ep && d.episode_count) ep.textContent = `Episode ${d.episode_count}`;
+  // Only advance the uptime display while the controller is alive
+  if (!controllerDead) {
+    const ut = document.getElementById('nav-uptime');
+    if (ut && d.uptime_s != null) ut.textContent = `${Math.round(d.uptime_s)}s`;
+  }
   if (_dataCallback) _dataCallback(d);
 }
 
 function setStale(stale) {
   document.documentElement.classList.toggle('is-stale', !!stale);
+
+  // Freeze/unfreeze the uptime counter
+  const ut = document.getElementById('nav-uptime');
+  if (ut) {
+    if (stale) {
+      if (!ut.dataset.frozen) ut.dataset.frozen = ut.textContent;
+      ut.textContent = (ut.dataset.frozen || '—') + ' ⏹';
+      ut.style.color = 'var(--red)';
+    } else {
+      delete ut.dataset.frozen;
+      ut.style.color = '';
+    }
+  }
+
+  // Pause/resume SVG SMIL animations (packet flow dots)
+  document.querySelectorAll('svg').forEach(svg => {
+    try { stale ? svg.pauseAnimations() : svg.unpauseAnimations(); } catch(e) {}
+  });
+
   let banner = document.getElementById('stale-banner');
   if (stale) {
     if (!banner) {
@@ -128,24 +161,27 @@ function connectSSE() {
   };
 }
 
-/* Stale-data watchdog — runs once per second regardless of SSE messages. */
+/* Stale-data watchdog — runs once per second, but only on live-data pages.
+   Pages that don't call initPage() (e.g. the self-driven Simulation Lab) never
+   pull from the API and must never show a stale banner. */
 setInterval(() => {
-  if (_lastDataTime && Date.now() - _lastDataTime > STALE_AFTER_MS) {
+  if (_liveDataPage && _lastDataTime && Date.now() - _lastDataTime > STALE_AFTER_MS) {
     setStale(true);
   }
 }, 1000);
 
 /* When the tab regains focus, force a fresh snapshot — fixes the case where
    browser throttled background SSE delivery and the page is showing data
-   from the previous session / minutes ago. */
+   from the previous session / minutes ago. Guarded so non-live pages opt out. */
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') fetchSnapshot();
+  if (_liveDataPage && document.visibilityState === 'visible') fetchSnapshot();
 });
-window.addEventListener('focus', fetchSnapshot);
-window.addEventListener('pageshow', (e) => { if (e.persisted) fetchSnapshot(); });
+window.addEventListener('focus', () => { if (_liveDataPage) fetchSnapshot(); });
+window.addEventListener('pageshow', (e) => { if (_liveDataPage && e.persisted) fetchSnapshot(); });
 
 /* ── Init ───────────────────────────────────────────────────────────────── */
 function initPage(pageName, callback) {
+  _liveDataPage = true;
   injectNav(pageName);
   initTheme();
   initIcons();
@@ -168,8 +204,12 @@ const setTxt = (id, v) => { const e = document.getElementById(id); if (e) e.text
 /* ── Path helpers ───────────────────────────────────────────────────────── */
 function pathBadge(p) {
   if (!p || p === '?') return '<span class="badge" style="opacity:.4">?</span>';
-  const m = { PATH_A:['b-A','PATH A'], PATH_B:['b-B','PATH B'], PATH_C:['b-C','PATH C'], DROP:['b-D','DROP'] };
-  const match = m[p] || m[Object.keys(m).find(k => p.includes(k.replace('PATH_','')))] ;
+  const m = {
+    PATH_A:['b-A','PATH A'], PATH_B:['b-B','PATH B'],
+    PATH_C:['b-C','PATH C'], PATH_D:['b-D4','PATH D'],
+    PATH_E:['b-E','PATH E'], DROP:['b-D','DROP'],
+  };
+  const match = m[p];
   if (match) return `<span class="badge ${match[0]}">${match[1]}</span>`;
   return `<span class="badge">${p}</span>`;
 }
@@ -191,13 +231,14 @@ function jainFairnessIndex(utils) {
 
 /**
  * Estimated avg latency (ms) from path distribution.
- * Path A via S3 = 7ms, Path B via S4 = 13ms, Path C crosslink ≈ 15ms.
+ * A=7ms, B=13ms, C=15ms, D=10ms, E=15ms.
  */
 function estimatedLatency(pathCounts) {
   if (!pathCounts) return null;
   const a=pathCounts.PATH_A||0, b=pathCounts.PATH_B||0, c=pathCounts.PATH_C||0;
-  const total = a+b+c;
-  return total===0 ? null : (a*7 + b*13 + c*15)/total;
+  const d=pathCounts.PATH_D||0, e=pathCounts.PATH_E||0;
+  const total = a+b+c+d+e;
+  return total===0 ? null : (a*7 + b*13 + c*15 + d*10 + e*15)/total;
 }
 
 /**
@@ -205,7 +246,8 @@ function estimatedLatency(pathCounts) {
  */
 function dropRate(pathCounts) {
   if (!pathCounts) return null;
-  const total = (pathCounts.PATH_A||0)+(pathCounts.PATH_B||0)+(pathCounts.PATH_C||0)+(pathCounts.DROP||0);
+  const total = (pathCounts.PATH_A||0)+(pathCounts.PATH_B||0)+(pathCounts.PATH_C||0)
+              + (pathCounts.PATH_D||0)+(pathCounts.PATH_E||0)+(pathCounts.DROP||0);
   return total===0 ? 0 : (pathCounts.DROP||0)/total;
 }
 
@@ -269,18 +311,34 @@ function drawAxes(svg,x,y,dims,opts={}) {
 }
 
 /* ── Util Bars ──────────────────────────────────────────────────────────── */
-const UTIL_LABELS = ['S1→S3 (A)','S1→S4 (B)','S2→S3 (A)','S2→S4 (B)','S3→S5 (A)','S4→S5 (B)','Crosslink (C)'];
-const UTIL_COLORS = ['var(--pathA)','var(--pathB)','var(--pathA)','var(--pathB)','var(--pathA)','var(--pathB)','var(--pathC)'];
+// State indices → display labels + colors
+const UTIL_ROWS = [
+  [0,  'S1→S3 (A)', 'var(--pathA)'],
+  [1,  'S1→S4 (B)', 'var(--pathB)'],
+  [2,  'S2→S3 (A)', 'var(--pathA)'],
+  [3,  'S2→S4 (B)', 'var(--pathB)'],
+  [4,  'S3→S5 (A)', 'var(--pathA)'],
+  [5,  'S4→S5 (B)', 'var(--pathB)'],
+  [6,  'Cross (C)',  'var(--pathC)'],
+  [20, 'S6→S3 (A)', 'var(--pathA)'],
+  [21, 'S6→S4 (B)', 'var(--pathB)'],
+  [22, 'S3→S7 (D)', '#06b6d4'],
+  [23, 'S4→S7 (E)', '#ec4899'],
+];
 
 function renderUtilBars(containerId, state) {
   const el = document.getElementById(containerId);
-  if (!el||!state||state.length<7) return;
-  el.innerHTML = state.slice(0,7).map((v,i)=>{
-    const pct=Math.round(v*100), col=v>.8?'var(--red)':v>.5?'var(--yellow)':UTIL_COLORS[i];
-    return `<div class="util-row">
-      <span class="util-label">${UTIL_LABELS[i]}</span>
-      <div class="util-track"><div class="util-fill" style="width:${pct}%;background:${col}"></div></div>
-      <span class="util-val" style="color:${col}">${pct}%</span>
-    </div>`;
-  }).join('');
+  if (!el || !state || state.length < 7) return;
+  el.innerHTML = UTIL_ROWS
+    .filter(([idx]) => state[idx] != null)
+    .map(([idx, label, baseCol]) => {
+      const v = state[idx] ?? 0;
+      const pct = Math.round(v * 100);
+      const col = v > .8 ? 'var(--red)' : v > .5 ? 'var(--yellow)' : baseCol;
+      return `<div class="util-row">
+        <span class="util-label">${label}</span>
+        <div class="util-track"><div class="util-fill" style="width:${pct}%;background:${col}"></div></div>
+        <span class="util-val" style="color:${col}">${pct}%</span>
+      </div>`;
+    }).join('');
 }
